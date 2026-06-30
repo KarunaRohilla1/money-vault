@@ -1,0 +1,5 @@
+streamlit-aggrid
+streamlit-antd-components
+pandas
+plotly
+python-dateutil
