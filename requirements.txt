@@ -3,3 +3,5 @@ streamlit-antd-components
 pandas
 plotly
 python-dateutil
+psycopg2-binary
+supabase

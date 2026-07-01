@@ -627,7 +627,7 @@ def create_cycle(vault_id, month, year):
 
     cursor.execute(
         """
-        INSERT OR IGNORE INTO monthly_cycles
+        INSERT INTO monthly_cycles
         (
             vault_id,
             month,
@@ -635,6 +635,7 @@ def create_cycle(vault_id, month, year):
             status
         )
         VALUES (?, ?, ?, ?)
+        ON CONFLICT (vault_id, month, year) DO NOTHING
         """,
         (
             vault_id,
@@ -1030,7 +1031,7 @@ def finalize_month(
 
         cursor.execute(
             """
-            INSERT OR IGNORE INTO monthly_cycles
+            INSERT INTO monthly_cycles
             (
                 vault_id,
                 month,
@@ -1039,6 +1040,7 @@ def finalize_month(
             )
             VALUES
             (?, ?, ?, 'ACTIVE')
+            ON CONFLICT (vault_id, month, year) DO NOTHING
             """,
             (
                 vault_id,

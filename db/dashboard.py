@@ -78,7 +78,7 @@ def get_transaction_count_this_month(vault_id):
         WHERE vault_id = ?
         AND is_deleted = 0
 
-        AND strftime('%Y-%m', date)
+        AND to_char(date::date, 'YYYY-MM')
             = ?
         """,
         (
@@ -108,7 +108,7 @@ def get_income_this_month(vault_id):
         AND is_deleted = 0
         AND transaction_type = 'Income'
 
-        AND strftime('%Y-%m', date)
+        AND to_char(date::date, 'YYYY-MM')
             = ?
         """,
         (
@@ -138,7 +138,7 @@ def get_expense_this_month(vault_id):
         AND is_deleted = 0
         AND transaction_type = 'Expense'
 
-        AND strftime('%Y-%m', date)
+        AND to_char(date::date, 'YYYY-MM')
             = ?
         """,
         (
@@ -305,7 +305,7 @@ def get_category_spending_this_month(vault_id):
             ON t.category_id = c.id
         WHERE t.vault_id = ?
             AND t.transaction_type = 'Expense'
-            AND strftime('%Y-%m', t.date)
+            AND to_char(t.date::date, 'YYYY-MM')
                 = ?
         GROUP BY c.name
         ORDER BY SUM(t.amount) DESC

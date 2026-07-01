@@ -1,7 +1,6 @@
-import sqlite3
-
 import streamlit as st
 
+from db.postgres import IntegrityError
 from db.vaults import (
     create_vault,
     delete_vault,
@@ -40,7 +39,7 @@ def create_vault_dialog():
 
 @st.dialog("Edit Vault")
 def edit_vault_dialog(vault):
-    vault_id, name, is_admin, _pin_plain, month_start_day, vault_type = vault
+    vault_id, name, is_admin, month_start_day, vault_type = vault
     vaults = get_all_vaults()
     share_options = vault_share_options(
         vaults,
@@ -129,7 +128,7 @@ def edit_vault_dialog(vault):
             except ValueError as error:
                 st.error(str(error))
                 st.stop()
-            except sqlite3.IntegrityError:
+            except IntegrityError:
                 st.error("A vault with this name already exists.")
                 st.stop()
 
@@ -143,7 +142,7 @@ def edit_vault_dialog(vault):
 
 @st.dialog("Delete Vault")
 def delete_vault_dialog(vault):
-    vault_id, name, is_admin, _pin_plain, _month_start_day, _vault_type = vault
+    vault_id, name, is_admin, _month_start_day, _vault_type = vault
 
     st.warning(
         f"Delete '{name}'? This removes its accounts, transactions, planning data, categories, and wishlist."
@@ -273,7 +272,7 @@ def render_create_vault_form(form_key):
                     vault_type=vault_type,
                     shared_vault_ids=shared_vault_ids
                 )
-            except sqlite3.IntegrityError:
+            except IntegrityError:
                 st.error("A vault with this name already exists.")
                 st.stop()
 
@@ -281,7 +280,7 @@ def render_create_vault_form(form_key):
 
 
 def render_vault_actions(vault):
-    vault_id, name, is_admin, _pin_plain, _month_start_day, _vault_type = vault
+    vault_id, name, is_admin, _month_start_day, _vault_type = vault
 
     if hasattr(st, "popover"):
         with st.popover("⋮"):
@@ -354,7 +353,7 @@ def render_vaults_table(vaults):
     )
 
     for vault in vaults:
-        vault_id, name, is_admin, _pin_plain, _month_start_day, vault_type = vault
+        vault_id, name, is_admin, _month_start_day, vault_type = vault
 
         row = st.columns(
             [2.6, 1.0, 1.1, 0.55],
@@ -402,7 +401,7 @@ def render_vaults_table(vaults):
 
 
 def render_user_details(vault):
-    vault_id, name, is_admin, pin_plain, month_start_day, _vault_type = vault
+    vault_id, name, is_admin, month_start_day, _vault_type = vault
 
     st.markdown(
         """
@@ -428,10 +427,9 @@ def render_user_details(vault):
 
         with pin_col:
             new_pin = st.text_input(
-                "PIN",
-                value=pin_plain or "",
+                "New PIN",
                 type="password",
-                placeholder="Set a new PIN"
+                placeholder="Leave blank to keep current PIN"
             )
 
         with day_col:
@@ -467,11 +465,7 @@ def render_user_details(vault):
                 st.error("Name is required.")
                 st.stop()
 
-            if not new_pin:
-                st.error("PIN is required.")
-                st.stop()
-
-            if len(new_pin) < 4:
+            if new_pin and len(new_pin) < 4:
                 st.error("PIN must be at least 4 characters.")
                 st.stop()
 
@@ -479,13 +473,13 @@ def render_user_details(vault):
                 update_vault(
                     vault_id,
                     new_name,
-                    pin=new_pin,
+                    pin=new_pin or None,
                     month_start_day=new_month_start_day
                 )
             except ValueError as error:
                 st.error(str(error))
                 st.stop()
-            except sqlite3.IntegrityError:
+            except IntegrityError:
                 st.error("A vault with this name already exists.")
                 st.stop()
 

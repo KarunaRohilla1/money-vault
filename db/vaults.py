@@ -41,24 +41,6 @@ def verify_pin(vault_name, pin):
         )
     ).fetchone()
 
-    if vault:
-        conn.execute(
-            """
-            UPDATE vaults
-            SET pin_plain = ?
-            WHERE id = ?
-            AND (
-                pin_plain IS NULL
-                OR pin_plain = ''
-            )
-            """,
-            (
-                pin,
-                vault[0]
-            )
-        )
-        conn.commit()
-
     conn.close()
 
     return vault
@@ -98,17 +80,15 @@ def create_vault(
         (
             name,
             pin_hash,
-            pin_plain,
             month_start_day,
             vault_type,
             is_admin
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?)
         """,
         (
             name,
             hash_pin(pin),
-            pin,
             1,
             vault_type,
             int(is_admin)
@@ -180,12 +160,6 @@ def update_vault(
         params.append(
             hash_pin(pin)
         )
-        updates.append(
-            "pin_plain = ?"
-        )
-        params.append(
-            pin
-        )
 
     if is_admin is not None:
         updates.append(
@@ -250,11 +224,12 @@ def update_vault_shares_with_cursor(cursor, vault_id, shared_vault_ids):
 
         cursor.execute(
             """
-            INSERT OR IGNORE INTO vault_shares (
+            INSERT INTO vault_shares (
                 vault_id,
                 shared_vault_id
             )
             VALUES (?, ?)
+            ON CONFLICT (vault_id, shared_vault_id) DO NOTHING
             """,
             (
                 vault_id,
@@ -295,7 +270,6 @@ def get_vault_by_id(vault_id):
             id,
             name,
             is_admin,
-            pin_plain,
             month_start_day,
             vault_type
         FROM vaults
@@ -319,7 +293,6 @@ def get_all_vaults():
             id,
             name,
             is_admin,
-            pin_plain,
             month_start_day,
             vault_type
         FROM vaults

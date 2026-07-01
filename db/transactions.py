@@ -117,7 +117,7 @@ def get_filtered_transactions(
 
     if month:
         query += """
-        AND strftime('%Y-%m', t.date) = ?
+        AND to_char(t.date::date, 'YYYY-MM') = ?
         """
         params.append(month)
 
@@ -136,7 +136,7 @@ def get_filtered_transactions(
     if search:
         query += """
         AND (
-            LOWER(IFNULL(t.notes,'')) LIKE ?
+            LOWER(COALESCE(t.notes,'')) LIKE ?
             OR LOWER(c.name) LIKE ?
             OR LOWER(a.name) LIKE ?
         )

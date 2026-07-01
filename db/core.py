@@ -1,14 +1,12 @@
-import sqlite3
 import hashlib
 import calendar
 import uuid
-from pathlib import Path
+
+from db.postgres import connect, execute_schema
 
 # ==================================================
 # DATABASE SETUP
 # ==================================================
-
-DB_PATH = "data/money.db"
 
 ACCOUNT_TYPES = [
     "Salary Account",
@@ -27,309 +25,18 @@ DEFAULT_CATEGORY_EMOJI = "\U0001f3f7\ufe0f"
 DEFAULT_CATEGORY_TYPE = EXPENSE
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "PRAGMA foreign_keys = ON"
-    )
-    return conn
+    return connect()
 
 def hash_pin(pin):
     return hashlib.sha256(pin.encode()).hexdigest()
 
 
-def backfill_plain_pins_with_cursor(cursor):
-    rows = cursor.execute(
-        """
-        SELECT id, pin_hash
-        FROM vaults
-        WHERE pin_plain IS NULL
-        OR pin_plain = ''
-        """
-    ).fetchall()
-
-    pin_lookup = {
-        hash_pin(f"{pin:04d}"): f"{pin:04d}"
-        for pin in range(10000)
-    }
-
-    for vault_id, pin_hash in rows:
-        pin = pin_lookup.get(pin_hash)
-
-        if not pin:
-            continue
-
-        cursor.execute(
-            """
-            UPDATE vaults
-            SET pin_plain = ?
-            WHERE id = ?
-            """,
-            (
-                pin,
-                vault_id
-            )
-        )
-
-
 def initialize_database():
-    Path("data").mkdir(exist_ok=True)
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS vaults (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        pin_hash TEXT NOT NULL,
-        pin_plain TEXT,
-        month_start_day INTEGER NOT NULL DEFAULT 1,
-        vault_type TEXT NOT NULL DEFAULT 'Individual',
-        is_admin INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS vault_shares (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vault_id INTEGER NOT NULL,
-        shared_vault_id INTEGER NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(vault_id, shared_vault_id),
-        FOREIGN KEY(vault_id) REFERENCES vaults(id),
-        FOREIGN KEY(shared_vault_id) REFERENCES vaults(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS accounts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    vault_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    opening_balance REAL NOT NULL DEFAULT 0,
-    is_active INTEGER NOT NULL DEFAULT 1,
-    is_primary INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY(vault_id) REFERENCES vaults(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    vault_id INTEGER NOT NULL,
-    account_id INTEGER,
-    category_id INTEGER,
-    date TEXT NOT NULL,
-    amount REAL NOT NULL,
-    transaction_type TEXT NOT NULL,
-    notes TEXT,
-    transfer_group_id TEXT,
-    is_deleted INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY(vault_id) REFERENCES vaults(id),
-    FOREIGN KEY(account_id) REFERENCES accounts(id),
-    FOREIGN KEY(category_id) REFERENCES categories(id))""")
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS categories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    vault_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    emoji TEXT NOT NULL,
-    category_type TEXT NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1,
-    FOREIGN KEY(vault_id) REFERENCES vaults(id))""")
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS income_templates (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vault_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        amount REAL NOT NULL,
-        due_day INTEGER NOT NULL,
-        account_id INTEGER NOT NULL,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        FOREIGN KEY(vault_id)
-            REFERENCES vaults(id),
-        FOREIGN KEY(account_id)
-            REFERENCES accounts(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS commitments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vault_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        amount REAL NOT NULL,
-        due_day INTEGER NOT NULL,
-        account_id INTEGER NOT NULL,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        FOREIGN KEY(vault_id)
-            REFERENCES vaults(id),
-        FOREIGN KEY(account_id)
-            REFERENCES accounts(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS obligation_status (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        commitment_id INTEGER NOT NULL,
-        month INTEGER NOT NULL,
-        year INTEGER NOT NULL,
-        actual_amount REAL,
-        status TEXT DEFAULT 'PENDING',
-        notes TEXT,
-        UNIQUE(
-            commitment_id,
-            month,
-            year
-        ),
-        FOREIGN KEY(commitment_id)
-            REFERENCES commitments(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS income_status (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-        income_template_id INTEGER NOT NULL,
-
-        month INTEGER NOT NULL,
-
-        year INTEGER NOT NULL,
-
-        actual_amount REAL,
-
-        status TEXT DEFAULT 'PENDING',
-
-        notes TEXT,
-
-        UNIQUE(
-            income_template_id,
-            month,
-            year
-        ),
-
-        FOREIGN KEY(income_template_id)
-            REFERENCES income_templates(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS monthly_cycles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vault_id INTEGER NOT NULL,
-        month INTEGER NOT NULL,
-        year INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(vault_id, month, year)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS wishlist_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vault_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        category TEXT NOT NULL DEFAULT '',
-        estimated_cost REAL NOT NULL DEFAULT 0,
-        saved_amount REAL NOT NULL DEFAULT 0,
-        target_date TEXT,
-        account_id INTEGER,
-        image_url TEXT,
-        notes TEXT,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(vault_id) REFERENCES vaults(id),
-        FOREIGN KEY(account_id) REFERENCES accounts(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS wishlist_categories (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vault_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(vault_id, name),
-        FOREIGN KEY(vault_id) REFERENCES vaults(id)
-    )
-    """)
-
-    conn.commit()
-    conn.close()
+    execute_schema()
 
 def migrate_database():
     conn = get_connection()
     cursor = conn.cursor()
-    try:
-        cursor.execute("""
-        ALTER TABLE vaults
-        ADD COLUMN pin_plain TEXT
-        """)
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("""
-        ALTER TABLE vaults
-        ADD COLUMN month_start_day INTEGER NOT NULL DEFAULT 1
-        """)
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("""
-        ALTER TABLE vaults
-        ADD COLUMN vault_type TEXT NOT NULL DEFAULT 'Individual'
-        """)
-    except sqlite3.OperationalError:
-        pass
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS vault_shares (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vault_id INTEGER NOT NULL,
-        shared_vault_id INTEGER NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(vault_id, shared_vault_id),
-        FOREIGN KEY(vault_id) REFERENCES vaults(id),
-        FOREIGN KEY(shared_vault_id) REFERENCES vaults(id)
-    )
-    """)
-
-    backfill_plain_pins_with_cursor(
-        cursor
-    )
-
-    try:
-        cursor.execute("""
-        ALTER TABLE accounts
-        ADD COLUMN opening_balance REAL NOT NULL DEFAULT 0
-        """)
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("""
-        ALTER TABLE accounts
-        ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1
-        """)
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("""
-        ALTER TABLE accounts
-        ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0
-        """)
-    except sqlite3.OperationalError:
-        pass
 
     cursor.execute(
         """
@@ -345,14 +52,6 @@ def migrate_database():
         """
     )
 
-    try:
-        cursor.execute("""
-        ALTER TABLE categories
-        ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1
-        """)
-    except sqlite3.OperationalError:
-        pass
-
     cursor.execute(
         """
         UPDATE categories
@@ -367,74 +66,12 @@ def migrate_database():
         )
     )
 
-    try:
-        cursor.execute("""
-        ALTER TABLE transactions
-        ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0
-        """)
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("""
-        ALTER TABLE transactions
-        ADD COLUMN transfer_group_id TEXT
-        """)
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("""
-        ALTER TABLE income_status
-        ADD COLUMN transaction_id INTEGER
-        """)
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("""
-        ALTER TABLE obligation_status
-        ADD COLUMN transaction_id INTEGER
-        """)
-    except sqlite3.OperationalError:
-        pass
-
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS wishlist_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vault_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        category TEXT NOT NULL DEFAULT '',
-        estimated_cost REAL NOT NULL DEFAULT 0,
-        saved_amount REAL NOT NULL DEFAULT 0,
-        target_date TEXT,
-        account_id INTEGER,
-        image_url TEXT,
-        notes TEXT,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(vault_id) REFERENCES vaults(id),
-        FOREIGN KEY(account_id) REFERENCES accounts(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS wishlist_categories (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vault_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(vault_id, name),
-        FOREIGN KEY(vault_id) REFERENCES vaults(id)
-    )
-    """)
-
-    cursor.execute("""
-    INSERT OR IGNORE INTO wishlist_categories (vault_id, name)
+    INSERT INTO wishlist_categories (vault_id, name)
     SELECT DISTINCT vault_id, TRIM(category)
     FROM wishlist_items
     WHERE TRIM(COALESCE(category, '')) != ''
+    ON CONFLICT (vault_id, name) DO NOTHING
     """)
 
     ensure_default_categories_with_cursor(

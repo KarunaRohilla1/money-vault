@@ -1,10 +1,9 @@
-import sqlite3
-
 from db.core import (
     DEFAULT_CATEGORY_NAME,
     ensure_default_category,
     get_connection
 )
+from db.postgres import IntegrityError
 
 
 def add_category(
@@ -71,7 +70,7 @@ def add_category(
 
         return True
 
-    except sqlite3.IntegrityError:
+    except IntegrityError:
 
         return False
 

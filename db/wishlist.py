@@ -294,7 +294,7 @@ def get_wishlist_items(
         AND (
             LOWER(w.name) LIKE ?
             OR LOWER(w.category) LIKE ?
-            OR LOWER(IFNULL(w.notes, '')) LIKE ?
+            OR LOWER(COALESCE(w.notes, '')) LIKE ?
         )
         """
         term = f"%{search.lower()}%"

@@ -1,3 +1,4 @@
+import os
 import tempfile
 from pathlib import Path
 import sys
@@ -11,6 +12,16 @@ import database
 
 
 def run():
+
+    if not (
+        os.environ.get("SUPABASE_DB_URL")
+        or os.environ.get("DATABASE_URL")
+    ) or os.environ.get("MONEY_VAULT_RUN_DB_SMOKE") != "1":
+        print(
+            "smoke money flow skipped: configure a disposable Supabase database "
+            "and set MONEY_VAULT_RUN_DB_SMOKE=1 to run it"
+        )
+        return
 
     with tempfile.TemporaryDirectory() as tmp:
 
