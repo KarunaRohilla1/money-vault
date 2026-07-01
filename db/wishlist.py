@@ -1,3 +1,4 @@
+from db.cache import cache_data, clear_data_cache
 from db.core import get_connection
 
 
@@ -28,8 +29,9 @@ def add_wishlist_category(vault_id, name):
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_wishlist_categories(vault_id):
 
     conn = get_connection()
@@ -52,7 +54,7 @@ def get_wishlist_categories(vault_id):
 
     return rows
 
-
+@cache_data(ttl=60)
 def get_wishlist_category(category_id):
 
     conn = get_connection()
@@ -74,7 +76,7 @@ def get_wishlist_category(category_id):
 
     return category
 
-
+@cache_data(ttl=60)
 def get_wishlist_category_item_count(vault_id, name):
 
     conn = get_connection()
@@ -158,6 +160,7 @@ def update_wishlist_category(category_id, vault_id, old_name, new_name):
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
 
 def delete_wishlist_category(category_id, vault_id, name, fallback="General"):
@@ -210,6 +213,7 @@ def delete_wishlist_category(category_id, vault_id, name, fallback="General"):
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
 
 def add_wishlist_item(
@@ -256,8 +260,9 @@ def add_wishlist_item(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_wishlist_items(
     vault_id,
     search=None,
@@ -344,7 +349,7 @@ def get_wishlist_items(
 
     return rows
 
-
+@cache_data(ttl=60)
 def get_wishlist_item(item_id):
 
     conn = get_connection()
@@ -417,6 +422,7 @@ def update_wishlist_item(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
 
 def delete_wishlist_item(item_id):
@@ -433,8 +439,9 @@ def delete_wishlist_item(item_id):
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_wishlist_summary(vault_id):
 
     conn = get_connection()

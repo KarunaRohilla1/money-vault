@@ -3,6 +3,7 @@ from db.core import (
     ensure_default_category,
     get_connection
 )
+from db.cache import cache_data, clear_data_cache
 from db.postgres import IntegrityError
 
 
@@ -67,6 +68,7 @@ def add_category(
         )
 
         conn.commit()
+        clear_data_cache()
 
         return True
 
@@ -78,7 +80,7 @@ def add_category(
 
         conn.close()
 
-
+@cache_data(ttl=60)
 def get_categories(vault_id):
 
     ensure_default_category(
@@ -106,7 +108,7 @@ def get_categories(vault_id):
 
     return categories
 
-
+@cache_data(ttl=60)
 def get_category_transaction_count(category_id):
 
     conn = get_connection()
@@ -147,6 +149,7 @@ def move_category_transactions(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
 
 def delete_category(category_id):
@@ -183,8 +186,9 @@ def delete_category(category_id):
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_category_dropdown(vault_id):
 
     ensure_default_category(
@@ -278,3 +282,4 @@ def update_category(
 
     conn.commit()
     conn.close()
+    clear_data_cache()

@@ -8,6 +8,7 @@ from db.core import (
     get_planning_transaction_date,
     upsert_linked_transaction
 )
+from db.cache import cache_data, clear_data_cache
 
 
 def add_commitment(
@@ -43,8 +44,9 @@ def add_commitment(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_commitments(vault_id):
 
     conn = get_connection()
@@ -115,6 +117,7 @@ def delete_commitment(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
 
 def update_commitment(
@@ -148,8 +151,9 @@ def update_commitment(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_total_commitments(vault_id):
 
     conn = get_connection()
@@ -168,7 +172,7 @@ def get_total_commitments(vault_id):
 
     return total
 
-
+@cache_data(ttl=60)
 def get_obligation_status(
     commitment_id,
     month,
@@ -359,6 +363,7 @@ def save_obligation_status(
         )
 
         conn.commit()
+        clear_data_cache()
 
     except Exception:
 
@@ -370,7 +375,7 @@ def save_obligation_status(
 
         conn.close()
 
-
+@cache_data(ttl=60)
 def get_income_status(
     income_template_id,
     month,
@@ -567,6 +572,7 @@ def save_income_status(
         )
 
         conn.commit()
+        clear_data_cache()
 
     except Exception:
 
@@ -578,7 +584,7 @@ def save_income_status(
 
         conn.close()
 
-
+@cache_data(ttl=60)
 def get_cycle(
     vault_id,
     month,
@@ -644,6 +650,7 @@ def create_cycle(vault_id, month, year):
             status
         )
     )
+    changed_rows = cursor.rowcount
 
     # If this month already existed as PLANNED and it has now
     # become the current month, activate it automatically.
@@ -665,9 +672,12 @@ def create_cycle(vault_id, month, year):
                 year
             )
         )
+        changed_rows += cursor.rowcount
 
     conn.commit()
     conn.close()
+    if changed_rows:
+        clear_data_cache()
 
 
 def get_next_month(month, year):
@@ -678,6 +688,7 @@ def get_next_month(month, year):
     return month + 1, year
 
 
+@cache_data(ttl=60)
 def get_monthly_planning_totals(vault_id, month, year):
 
     income = 0
@@ -1065,6 +1076,7 @@ def finalize_month(
         )
 
         conn.commit()
+        clear_data_cache()
 
     except Exception:
 
@@ -1110,8 +1122,9 @@ def add_income_template(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_income_templates(vault_id):
 
     conn = get_connection()
@@ -1175,6 +1188,7 @@ def update_income_template(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
 
 def delete_income_template(
@@ -1215,8 +1229,9 @@ def delete_income_template(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_total_income_templates(
     vault_id
 ):

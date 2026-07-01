@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from db.cache import cache_data
 from db.core import (
     EXPENSE,
     INCOME,
@@ -99,6 +100,7 @@ def period_bounds(vault_id, label):
     )
 
 
+@cache_data(ttl=60)
 def get_planning_report_totals(vault_id, start_date, end_date):
     income = 0
     commitments = 0
@@ -118,6 +120,7 @@ def get_planning_report_totals(vault_id, start_date, end_date):
     return income, commitments
 
 
+@cache_data(ttl=60)
 def get_standalone_transaction_totals(vault_id, start_date, end_date):
     conn = get_connection()
 
@@ -176,6 +179,7 @@ def get_standalone_transaction_totals(vault_id, start_date, end_date):
     return row[0], row[1]
 
 
+@cache_data(ttl=60)
 def get_report_summary(vault_id, start_date, end_date):
     conn = get_connection()
 
@@ -316,6 +320,7 @@ def get_report_summary(vault_id, start_date, end_date):
     }
 
 
+@cache_data(ttl=60)
 def get_category_breakdown(vault_id, start_date, end_date):
     conn = get_connection()
 
@@ -375,6 +380,7 @@ def get_category_breakdown(vault_id, start_date, end_date):
     return report_rows
 
 
+@cache_data(ttl=60)
 def get_monthly_trend(vault_id, end_date):
     months = []
     month = end_date.month

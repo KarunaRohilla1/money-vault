@@ -3,8 +3,10 @@ from db.core import (
     get_connection,
     hash_pin
 )
+from db.cache import cache_data, clear_data_cache
 
 
+@cache_data(ttl=60)
 def vault_exists():
 
     conn = get_connection()
@@ -16,7 +18,6 @@ def vault_exists():
     conn.close()
 
     return count > 0
-
 
 def verify_pin(vault_name, pin):
 
@@ -45,7 +46,7 @@ def verify_pin(vault_name, pin):
 
     return vault
 
-
+@cache_data(ttl=60)
 def get_vaults():
 
     conn = get_connection()
@@ -110,6 +111,7 @@ def create_vault(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
 
 def update_vault(
@@ -207,6 +209,7 @@ def update_vault(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
 
 def update_vault_shares_with_cursor(cursor, vault_id, shared_vault_ids):
@@ -237,7 +240,7 @@ def update_vault_shares_with_cursor(cursor, vault_id, shared_vault_ids):
             )
         )
 
-
+@cache_data(ttl=60)
 def get_vault_share_ids(vault_id):
 
     conn = get_connection()
@@ -259,7 +262,7 @@ def get_vault_share_ids(vault_id):
         for row in rows
     ]
 
-
+@cache_data(ttl=60)
 def get_vault_by_id(vault_id):
 
     conn = get_connection()
@@ -282,7 +285,7 @@ def get_vault_by_id(vault_id):
 
     return vault
 
-
+@cache_data(ttl=60)
 def get_all_vaults():
 
     conn = get_connection()
@@ -322,6 +325,7 @@ def promote_to_admin(vault_name):
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
     return affected_rows
 
@@ -341,8 +345,9 @@ def demote_admin(vault_name):
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_admin_count():
 
     conn = get_connection()
@@ -475,3 +480,4 @@ def delete_vault(vault_id):
 
     conn.commit()
     conn.close()
+    clear_data_cache()

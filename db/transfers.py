@@ -5,6 +5,7 @@ from db.core import (
     TRANSFER_OUT,
     get_connection
 )
+from db.cache import cache_data, clear_data_cache
 
 
 def add_transfer(
@@ -73,10 +74,12 @@ def add_transfer(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
     return transfer_group_id
 
 
+@cache_data(ttl=60)
 def get_transfers(
     vault_id,
     date_from=None,
@@ -165,7 +168,7 @@ def get_transfers(
 
     return transfers
 
-
+@cache_data(ttl=60)
 def get_transfer_by_group(
     transfer_group_id
 ):
@@ -258,6 +261,7 @@ def update_transfer(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
 
 def delete_transfer(
@@ -276,3 +280,4 @@ def delete_transfer(
 
     conn.commit()
     conn.close()
+    clear_data_cache()

@@ -29,6 +29,14 @@ def load_css():
             unsafe_allow_html=True
         )
 
+
+@st.cache_resource(show_spinner=False)
+def bootstrap_database():
+    initialize_database()
+    migrate_database()
+    return True
+
+
 st.set_page_config(
     page_title="Money Vault",
     page_icon="💰",
@@ -37,8 +45,7 @@ st.set_page_config(
 
 load_css()
 
-initialize_database()
-migrate_database()
+bootstrap_database()
 
 # -------------------
 # Session State

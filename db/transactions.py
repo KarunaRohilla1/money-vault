@@ -1,3 +1,4 @@
+from db.cache import cache_data, clear_data_cache
 from db.core import get_connection
 
 
@@ -40,8 +41,9 @@ def add_transaction(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_transactions(vault_id):
 
     conn = get_connection()
@@ -78,7 +80,7 @@ def get_transactions(vault_id):
 
     return transactions
 
-
+@cache_data(ttl=60)
 def get_filtered_transactions(
     vault_id,
     month=None,
@@ -206,6 +208,7 @@ def delete_transaction(transaction_id):
 
         conn.commit()
         conn.close()
+        clear_data_cache()
 
         return
 
@@ -243,8 +246,9 @@ def delete_transaction(transaction_id):
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_transaction_by_id(transaction_id):
 
     conn = get_connection()
@@ -332,3 +336,4 @@ def update_transaction(
 
     conn.commit()
     conn.close()
+    clear_data_cache()

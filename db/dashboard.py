@@ -1,11 +1,12 @@
 from datetime import datetime
 
 from db.accounts import (
-    get_account_balance,
     get_accounts,
+    get_account_balances,
     get_primary_account,
     get_total_credit_card_due
 )
+from db.cache import cache_data
 from db.core import get_connection
 from db.planning import (
     get_commitments,
@@ -14,6 +15,7 @@ from db.planning import (
 )
 
 
+@cache_data(ttl=60)
 def get_account_count(vault_id):
 
     conn = get_connection()
@@ -33,6 +35,7 @@ def get_account_count(vault_id):
     return count
 
 
+@cache_data(ttl=60)
 def get_dashboard_cycle(vault_id):
 
     conn = get_connection()
@@ -65,6 +68,7 @@ def get_cycle_filter(vault_id):
     return f"{year:04d}-{month:02d}"
 
 
+@cache_data(ttl=60)
 def get_transaction_count_this_month(vault_id):
 
     conn = get_connection()
@@ -92,6 +96,7 @@ def get_transaction_count_this_month(vault_id):
     return count
 
 
+@cache_data(ttl=60)
 def get_income_this_month(vault_id):
 
     conn = get_connection()
@@ -122,6 +127,7 @@ def get_income_this_month(vault_id):
     return total
 
 
+@cache_data(ttl=60)
 def get_expense_this_month(vault_id):
 
     conn = get_connection()
@@ -152,6 +158,7 @@ def get_expense_this_month(vault_id):
     return total
 
 
+@cache_data(ttl=60)
 def get_remaining_commitments(vault_id):
 
     month, year = get_dashboard_cycle(vault_id)
@@ -164,6 +171,7 @@ def get_remaining_commitments(vault_id):
     return totals["remaining_commitments"]
 
 
+@cache_data(ttl=60)
 def get_onboarding_status(vault_id):
 
     accounts = len(
@@ -225,9 +233,11 @@ def get_received_income_this_month(vault_id):
     )
 
 
+@cache_data(ttl=60)
 def get_available_cash(vault_id):
 
     accounts = get_accounts(vault_id)
+    balances = get_account_balances(vault_id)
 
     total = 0
 
@@ -237,19 +247,25 @@ def get_available_cash(vault_id):
 
         if account_type == "Salary Account":
 
-            total += get_account_balance(
-                account[0]
+            total += balances.get(
+                account[0],
+                0
             )
 
     return total
 
 
+@cache_data(ttl=60)
 def get_dashboard_summary(vault_id):
 
     month, year = get_dashboard_cycle(vault_id)
     primary_account = get_primary_account(vault_id)
+    account_balances = get_account_balances(vault_id)
     primary_account_balance = (
-        get_account_balance(primary_account[0])
+        account_balances.get(
+            primary_account[0],
+            0
+        )
         if primary_account
         else 0
     )
@@ -290,6 +306,7 @@ def get_dashboard_summary(vault_id):
     }
 
 
+@cache_data(ttl=60)
 def get_category_spending_this_month(vault_id):
 
     conn = get_connection()

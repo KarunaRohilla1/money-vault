@@ -6,7 +6,7 @@ from db.accounts import (
     account_has_transactions,
     add_account,
     archive_account,
-    get_account_balance,
+    get_account_balances,
     get_account_by_id,
     get_accounts,
     set_primary_account,
@@ -215,6 +215,7 @@ def show_accounts(vault_id):
     # ==================================
 
     accounts = get_accounts(vault_id)
+    account_balances = get_account_balances(vault_id)
 
     header_col, button_col = st.columns([8, 2])
 
@@ -252,7 +253,10 @@ def show_accounts(vault_id):
 
     for account in accounts:
 
-        balance = get_account_balance(account[0])
+        balance = account_balances.get(
+            account[0],
+            0
+        )
         account_type = account[2]
 
         if account_type == "Credit Card":
@@ -317,7 +321,10 @@ unsafe_allow_html=True
             account_type = account[2]
             is_primary = bool(account[4])
 
-            balance = get_account_balance(account_id)
+            balance = account_balances.get(
+                account_id,
+                0
+            )
 
             initials = "".join(
                 [w[0] for w in name.split()[:2]]

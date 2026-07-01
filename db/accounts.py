@@ -6,6 +6,7 @@ from db.core import (
     TRANSFER_OUT,
     get_connection
 )
+from db.cache import cache_data, clear_data_cache
 
 
 def add_account(
@@ -57,8 +58,9 @@ def add_account(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_accounts(vault_id):
 
     conn = get_connection()
@@ -121,8 +123,9 @@ def archive_account(account_id):
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_account_balance(account_id):
 
     conn = get_connection()
@@ -177,6 +180,48 @@ def get_account_balance(account_id):
     )
 
 
+@cache_data(ttl=60)
+def get_account_balances(vault_id):
+
+    conn = get_connection()
+
+    rows = conn.execute(
+        """
+        SELECT
+            a.id,
+            a.opening_balance
+                + COALESCE(SUM(
+                    CASE
+                        WHEN t.transaction_type IN (?, ?) THEN t.amount
+                        WHEN t.transaction_type IN (?, ?) THEN -t.amount
+                        ELSE 0
+                    END
+                ), 0) AS balance
+        FROM accounts a
+        LEFT JOIN transactions t
+            ON t.account_id = a.id
+            AND t.is_deleted = 0
+        WHERE a.vault_id = ?
+        AND a.is_active = 1
+        GROUP BY a.id, a.opening_balance
+        """,
+        (
+            INCOME,
+            TRANSFER_IN,
+            EXPENSE,
+            TRANSFER_OUT,
+            vault_id
+        )
+    ).fetchall()
+
+    conn.close()
+
+    return {
+        row[0]: row[1]
+        for row in rows
+    }
+
+
 def get_credit_card_due(account_id):
 
     balance = get_account_balance(
@@ -194,6 +239,9 @@ def get_total_credit_card_due(vault_id):
     accounts = get_accounts(
         vault_id
     )
+    balances = get_account_balances(
+        vault_id
+    )
 
     total_due = 0
 
@@ -201,9 +249,13 @@ def get_total_credit_card_due(vault_id):
 
         if account[2] == "Credit Card":
 
-            total_due += get_credit_card_due(
-                account[0]
+            balance = balances.get(
+                account[0],
+                0
             )
+
+            if balance < 0:
+                total_due += abs(balance)
 
     return total_due
 
@@ -263,8 +315,9 @@ def update_account(
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_account_by_id(account_id):
 
     conn = get_connection()
@@ -327,8 +380,9 @@ def set_primary_account(account_id):
 
     conn.commit()
     conn.close()
+    clear_data_cache()
 
-
+@cache_data(ttl=60)
 def get_primary_account(vault_id):
 
     conn = get_connection()
@@ -390,7 +444,7 @@ def account_exists(
 
     return result is not None
 
-
+@cache_data(ttl=60)
 def account_has_transactions(account_id):
 
     conn = get_connection()

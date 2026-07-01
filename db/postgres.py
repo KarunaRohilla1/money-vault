@@ -4,10 +4,13 @@ from pathlib import Path
 try:
     import psycopg2
     from psycopg2 import errors
+    from psycopg2.pool import SimpleConnectionPool
 except ImportError:
     psycopg2 = None
     errors = None
+    SimpleConnectionPool = None
 
+from db.cache import cache_resource
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "supabase" / "schema.sql"
 
@@ -82,6 +85,15 @@ def get_supabase_client():
 
 
 def connect():
+    pool = get_connection_pool()
+    return PostgresConnection(
+        pool.getconn(),
+        pool
+    )
+
+
+@cache_resource(show_spinner=False)
+def get_connection_pool():
     if psycopg2 is None:
         raise RuntimeError(
             "psycopg2 is not installed. Install dependencies from requirements.txt."
@@ -96,11 +108,12 @@ def connect():
             "require"
         )
 
-    raw_conn = psycopg2.connect(
+    return SimpleConnectionPool(
+        int(os.environ.get("POSTGRES_POOL_MIN", "1")),
+        int(os.environ.get("POSTGRES_POOL_MAX", "5")),
         database_url,
         **connect_kwargs
     )
-    return PostgresConnection(raw_conn)
 
 
 def execute_schema():
@@ -260,8 +273,10 @@ class PostgresCursor:
 
 
 class PostgresConnection:
-    def __init__(self, raw_connection):
+    def __init__(self, raw_connection, pool=None):
         self.raw_connection = raw_connection
+        self.pool = pool
+        self.closed = False
 
     def cursor(self):
         return PostgresCursor(
@@ -282,4 +297,19 @@ class PostgresConnection:
         self.raw_connection.rollback()
 
     def close(self):
-        self.raw_connection.close()
+        if self.closed:
+            return
+
+        if self.pool:
+            try:
+                self.raw_connection.rollback()
+            except Exception:
+                pass
+
+            self.pool.putconn(
+                self.raw_connection
+            )
+        else:
+            self.raw_connection.close()
+
+        self.closed = True
