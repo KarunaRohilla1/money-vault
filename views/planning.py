@@ -126,8 +126,6 @@ def show_planning(vault_id):
                     current_index - 1
                 ]
 
-                st.rerun()
-
         with nav_mid:
 
             st.markdown(
@@ -151,8 +149,6 @@ def show_planning(vault_id):
                 st.session_state.month_selector = months[
                     current_index + 1
                 ]
-
-                st.rerun()
 
     selected_month = st.session_state.month_selector
 

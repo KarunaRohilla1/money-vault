@@ -5,11 +5,12 @@ import streamlit as st
 from db.transactions import get_recent_activity_transactions
 
 
-def show_recent_transactions(vault_id, limit=5):
-    transactions = get_recent_activity_transactions(
-        vault_id,
-        limit
-    )
+def show_recent_transactions(vault_id, limit=5, transactions=None):
+    if transactions is None:
+        transactions = get_recent_activity_transactions(
+            vault_id,
+            limit
+        )
 
     st.markdown(
         """

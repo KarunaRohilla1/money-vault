@@ -16,6 +16,290 @@ from db.planning import (
 
 
 @cache_data(ttl=60)
+def get_dashboard_page_data(vault_id):
+
+    conn = get_connection()
+
+    row = conn.execute(
+        """
+        WITH cycle AS (
+            SELECT
+                COALESCE(
+                    (
+                        SELECT month
+                        FROM monthly_cycles
+                        WHERE vault_id = ?
+                        AND status = 'ACTIVE'
+                        ORDER BY year DESC, month DESC
+                        LIMIT 1
+                    ),
+                    EXTRACT(MONTH FROM CURRENT_DATE)::int
+                ) AS month,
+                COALESCE(
+                    (
+                        SELECT year
+                        FROM monthly_cycles
+                        WHERE vault_id = ?
+                        AND status = 'ACTIVE'
+                        ORDER BY year DESC, month DESC
+                        LIMIT 1
+                    ),
+                    EXTRACT(YEAR FROM CURRENT_DATE)::int
+                ) AS year
+        ),
+        onboarding AS (
+            SELECT
+                (
+                    SELECT COUNT(*)
+                    FROM accounts
+                    WHERE vault_id = ?
+                    AND is_active = 1
+                ) AS accounts,
+                (
+                    SELECT COUNT(*)
+                    FROM income_templates
+                    WHERE vault_id = ?
+                    AND is_active = 1
+                ) AS income_templates,
+                (
+                    SELECT COUNT(*)
+                    FROM commitments
+                    WHERE vault_id = ?
+                    AND is_active = 1
+                ) AS commitments
+        ),
+        account_balances AS (
+            SELECT
+                a.id,
+                a.name,
+                a.type,
+                a.is_primary,
+                a.opening_balance
+                    + COALESCE(SUM(
+                        CASE
+                            WHEN t.transaction_type IN ('Income', 'Transfer In') THEN t.amount
+                            WHEN t.transaction_type IN ('Expense', 'Transfer Out') THEN -t.amount
+                            ELSE 0
+                        END
+                    ), 0) AS balance
+            FROM accounts a
+            LEFT JOIN transactions t
+                ON t.account_id = a.id
+                AND t.is_deleted = 0
+            WHERE a.vault_id = ?
+            AND a.is_active = 1
+            GROUP BY a.id, a.name, a.type, a.is_primary, a.opening_balance
+        ),
+        primary_account AS (
+            SELECT id, name, balance
+            FROM account_balances
+            ORDER BY is_primary DESC, type, name
+            LIMIT 1
+        ),
+        transaction_totals AS (
+            SELECT
+                COALESCE(SUM(
+                    CASE
+                        WHEN transaction_type = 'Income' THEN amount
+                        ELSE 0
+                    END
+                ), 0) AS income,
+                COALESCE(SUM(
+                    CASE
+                        WHEN transaction_type = 'Expense' THEN amount
+                        ELSE 0
+                    END
+                ), 0) AS expenses
+            FROM transactions t
+            CROSS JOIN cycle c
+            WHERE t.vault_id = ?
+            AND t.is_deleted = 0
+            AND to_char(t.date::date, 'YYYY-MM')
+                = CONCAT(c.year::text, '-', LPAD(c.month::text, 2, '0'))
+        ),
+        commitment_totals AS (
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN COALESCE(s.status, 'PENDING') = 'PENDING'
+                        THEN COALESCE(s.actual_amount, cm.amount)
+                    ELSE 0
+                END
+            ), 0) AS remaining
+            FROM commitments cm
+            CROSS JOIN cycle c
+            LEFT JOIN obligation_status s
+                ON s.commitment_id = cm.id
+                AND s.month = c.month
+                AND s.year = c.year
+            WHERE cm.vault_id = ?
+            AND cm.is_active = 1
+        ),
+        cash_totals AS (
+            SELECT
+                COALESCE(SUM(
+                    CASE
+                        WHEN type = 'Salary Account' THEN balance
+                        ELSE 0
+                    END
+                ), 0) AS available_cash,
+                COALESCE(SUM(
+                    CASE
+                        WHEN type = 'Credit Card' AND balance < 0 THEN ABS(balance)
+                        ELSE 0
+                    END
+                ), 0) AS credit_card_due
+            FROM account_balances
+        ),
+        category_spending AS (
+            SELECT COALESCE(
+                json_agg(
+                    json_build_array(name, amount)
+                    ORDER BY amount DESC
+                ),
+                '[]'::json
+            ) AS rows
+            FROM (
+                SELECT
+                    c.name,
+                    SUM(t.amount) AS amount
+                FROM transactions t
+                JOIN categories c
+                    ON t.category_id = c.id
+                CROSS JOIN cycle cy
+                WHERE t.vault_id = ?
+                AND t.is_deleted = 0
+                AND t.transaction_type = 'Expense'
+                AND to_char(t.date::date, 'YYYY-MM')
+                    = CONCAT(cy.year::text, '-', LPAD(cy.month::text, 2, '0'))
+                GROUP BY c.name
+            ) data
+        ),
+        recent_activity AS (
+            SELECT COALESCE(
+                json_agg(
+                    json_build_array(
+                        id,
+                        transaction_date,
+                        account_name,
+                        category_name,
+                        amount,
+                        transaction_type,
+                        notes,
+                        transfer_group_id
+                    )
+                    ORDER BY transaction_date DESC, id DESC
+                ),
+                '[]'::json
+            ) AS rows
+            FROM (
+                SELECT
+                    t.id,
+                    t.date::text AS transaction_date,
+                    a.name AS account_name,
+                    COALESCE(c.emoji || ' ' || c.name, t.transaction_type) AS category_name,
+                    t.amount,
+                    t.transaction_type,
+                    t.notes,
+                    t.transfer_group_id
+                FROM transactions t
+                LEFT JOIN accounts a
+                    ON t.account_id = a.id
+                LEFT JOIN categories c
+                    ON t.category_id = c.id
+                WHERE t.vault_id = ?
+                AND t.is_deleted = 0
+                AND t.amount != 0
+                AND t.transaction_type NOT IN ('Transfer In', 'Transfer Out')
+                ORDER BY t.date DESC, t.id DESC
+                LIMIT 5
+            ) data
+        )
+        SELECT
+            onboarding.accounts,
+            onboarding.income_templates,
+            onboarding.commitments,
+            cycle.month,
+            cycle.year,
+            COALESCE(primary_account.name, 'Primary Account'),
+            COALESCE(primary_account.balance, 0),
+            transaction_totals.income,
+            transaction_totals.expenses,
+            commitment_totals.remaining,
+            cash_totals.available_cash,
+            cash_totals.credit_card_due,
+            category_spending.rows,
+            recent_activity.rows
+        FROM onboarding
+        CROSS JOIN cycle
+        CROSS JOIN transaction_totals
+        CROSS JOIN commitment_totals
+        CROSS JOIN cash_totals
+        CROSS JOIN category_spending
+        CROSS JOIN recent_activity
+        LEFT JOIN primary_account
+            ON TRUE
+        """,
+        (
+            vault_id,
+            vault_id,
+            vault_id,
+            vault_id,
+            vault_id,
+            vault_id,
+            vault_id,
+            vault_id,
+            vault_id,
+            vault_id
+        )
+    ).fetchone()
+
+    conn.close()
+
+    accounts = row[0]
+    income_templates = row[1]
+    commitments = row[2]
+    remaining_commitments = row[9]
+    available_cash = row[10]
+    credit_card_due = row[11]
+    safe_to_spend = max(
+        available_cash
+        - remaining_commitments
+        - credit_card_due,
+        0
+    )
+
+    return {
+        "status": {
+            "accounts": accounts,
+            "income_templates": income_templates,
+            "commitments": commitments,
+            "has_accounts": accounts > 0,
+            "has_income_templates": income_templates > 0,
+            "has_commitments": commitments > 0,
+            "is_complete": (
+                accounts > 0
+                and income_templates > 0
+                and commitments > 0
+            )
+        },
+        "summary": {
+            "month": row[3],
+            "year": row[4],
+            "income": row[7],
+            "primary_account_name": row[5],
+            "primary_account_balance": row[6],
+            "available_cash": available_cash,
+            "remaining_commitments": remaining_commitments,
+            "expenses": row[8],
+            "credit_card_due": credit_card_due,
+            "safe_to_spend": safe_to_spend
+        },
+        "category_spending": row[12] or [],
+        "recent_activity": row[13] or []
+    }
+
+
+@cache_data(ttl=60)
 def get_account_count(vault_id):
 
     conn = get_connection()

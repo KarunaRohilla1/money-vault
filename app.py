@@ -1,4 +1,5 @@
 import os
+import time
 
 import streamlit as st
 
@@ -12,15 +13,14 @@ from db.vaults import (
     verify_pin
 )
 
-from views.accounts import show_accounts
-from views.transactions import show_transactions
-from views.categories import show_categories
-from views.dashboard import show_dashboard
-from views.settings import show_settings
-from views.planning import show_planning
-from views.transfers import show_transfers
-from views.wishlist import show_wishlist
-from views.reports import show_reports
+
+PROFILED_PAGES = {
+    "Dashboard",
+    "Accounts",
+    "Transactions",
+    "Planning",
+    "Reports"
+}
 
 @st.cache_data(show_spinner=False)
 def get_css():
@@ -43,6 +43,19 @@ def bootstrap_database():
         initialize_database()
         migrate_database()
     return True
+
+
+def render_profiled_page(page_name, render_function, *args):
+    start = time.perf_counter()
+
+    try:
+        return render_function(*args)
+
+    finally:
+        elapsed = time.perf_counter() - start
+
+        if page_name in PROFILED_PAGES:
+            print(f"[money-vault perf] {page_name}: {elapsed:.3f}s")
 
 
 st.set_page_config(
@@ -158,42 +171,83 @@ else:
     )
 
     if page == "Dashboard":
-        show_dashboard(st.session_state.vault_id)
+        from views.dashboard import show_dashboard
+
+        render_profiled_page(
+            page,
+            show_dashboard,
+            st.session_state.vault_id
+        )
 
     elif page == "Accounts":
-        show_accounts(st.session_state.vault_id)
+        from views.accounts import show_accounts
+
+        render_profiled_page(
+            page,
+            show_accounts,
+            st.session_state.vault_id
+        )
 
     elif page == "Transactions":
-        show_transactions(
-        st.session_state.vault_id
-    )
+        from views.transactions import show_transactions
+
+        render_profiled_page(
+            page,
+            show_transactions,
+            st.session_state.vault_id
+        )
 
     elif page == "Planning":
-        show_planning(
-        st.session_state.vault_id
-    )
+        from views.planning import show_planning
+
+        render_profiled_page(
+            page,
+            show_planning,
+            st.session_state.vault_id
+        )
 
     elif page == "Settings":
-        show_settings(
+        from views.settings import show_settings
+
+        render_profiled_page(
+            page,
+            show_settings,
             st.session_state.vault_id,
             st.session_state.is_admin
         )
 
     elif page == "Categories":
-        show_categories(
-        st.session_state.vault_id)
+        from views.categories import show_categories
+
+        render_profiled_page(
+            page,
+            show_categories,
+            st.session_state.vault_id
+        )
 
     elif page == "Transfers":
-        show_transfers(
+        from views.transfers import show_transfers
+
+        render_profiled_page(
+            page,
+            show_transfers,
             st.session_state.vault_id
         )
 
     elif page == "Wishlist":
-        show_wishlist(
+        from views.wishlist import show_wishlist
+
+        render_profiled_page(
+            page,
+            show_wishlist,
             st.session_state.vault_id
         )
 
     elif page == "Reports":
-        show_reports(
+        from views.reports import show_reports
+
+        render_profiled_page(
+            page,
+            show_reports,
             st.session_state.vault_id
         )

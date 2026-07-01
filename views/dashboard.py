@@ -9,8 +9,7 @@ from components.header import dashboard_header
 from components.spending_insights import show_spending_insights
 from components.transaction_cards import show_recent_transactions
 from db.dashboard import (
-    get_dashboard_summary,
-    get_onboarding_status
+    get_dashboard_page_data
 )
 
 
@@ -146,9 +145,10 @@ def show_dashboard(vault_id):
 
     dashboard_header()
 
-    status = get_onboarding_status(
+    page_data = get_dashboard_page_data(
         vault_id
     )
+    status = page_data["status"]
 
     if not status["is_complete"]:
 
@@ -158,9 +158,7 @@ def show_dashboard(vault_id):
 
         return
 
-    dashboard = get_dashboard_summary(
-        vault_id
-    )
+    dashboard = page_data["summary"]
     dashboard["income"] = dashboard[
         "primary_account_balance"
     ]
@@ -231,13 +229,15 @@ def show_dashboard(vault_id):
     with activity_col:
 
         show_recent_transactions(
-            vault_id
+            vault_id,
+            transactions=page_data["recent_activity"]
         )
 
     with insights_col:
 
         show_spending_insights(
-            vault_id
+            vault_id,
+            category_data=page_data["category_spending"]
         )
 
     st.markdown(

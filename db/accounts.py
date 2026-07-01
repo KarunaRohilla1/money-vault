@@ -81,6 +81,55 @@ def get_accounts(vault_id):
     return accounts
 
 
+@cache_data(ttl=60)
+def get_accounts_with_balances(vault_id):
+
+    conn = get_connection()
+
+    accounts = conn.execute(
+        """
+        SELECT
+            a.id,
+            a.name,
+            a.type,
+            a.opening_balance,
+            a.is_primary,
+            a.opening_balance
+                + COALESCE(SUM(
+                    CASE
+                        WHEN t.transaction_type IN (?, ?) THEN t.amount
+                        WHEN t.transaction_type IN (?, ?) THEN -t.amount
+                        ELSE 0
+                    END
+                ), 0) AS balance
+        FROM accounts a
+        LEFT JOIN transactions t
+            ON t.account_id = a.id
+            AND t.is_deleted = 0
+        WHERE a.vault_id = ?
+        AND a.is_active = 1
+        GROUP BY
+            a.id,
+            a.name,
+            a.type,
+            a.opening_balance,
+            a.is_primary
+        ORDER BY a.is_primary DESC, a.type, a.name
+        """,
+        (
+            INCOME,
+            TRANSFER_IN,
+            EXPENSE,
+            TRANSFER_OUT,
+            vault_id
+        )
+    ).fetchall()
+
+    conn.close()
+
+    return accounts
+
+
 def archive_account(account_id):
 
     conn = get_connection()

@@ -7,7 +7,7 @@ from db.dashboard import (
 )
 
 
-def show_spending_insights(vault_id):
+def show_spending_insights(vault_id, category_data=None):
 
     st.markdown(
         """
@@ -18,11 +18,10 @@ def show_spending_insights(vault_id):
         unsafe_allow_html=True
     )
 
-    category_data = (
-        get_category_spending_this_month(
+    if category_data is None:
+        category_data = get_category_spending_this_month(
             vault_id
         )
-    )
 
     if not category_data:
 
