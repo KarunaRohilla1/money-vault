@@ -2,11 +2,14 @@ from datetime import datetime
 
 import streamlit as st
 
-from db.transactions import get_transactions
+from db.transactions import get_recent_activity_transactions
 
 
 def show_recent_transactions(vault_id, limit=5):
-    transactions = get_transactions(vault_id)
+    transactions = get_recent_activity_transactions(
+        vault_id,
+        limit
+    )
 
     st.markdown(
         """
@@ -18,21 +21,10 @@ def show_recent_transactions(vault_id, limit=5):
     )
 
     rows_html = ""
-    visible_count = 0
-
     for tx in transactions:
         transaction_type = tx[5]
 
-        if transaction_type in (
-            "Transfer In",
-            "Transfer Out"
-        ):
-            continue
-
         amount = tx[4]
-
-        if amount == 0:
-            continue
 
         date = datetime.strptime(
             tx[1],
@@ -67,11 +59,6 @@ def show_recent_transactions(vault_id, limit=5):
             <div class="{amount_class}">\u20b9{amount:,.0f}</div>
         </div>
         """
-
-        visible_count += 1
-
-        if visible_count >= limit:
-            break
 
     if not rows_html:
         rows_html = """

@@ -307,96 +307,34 @@ def show_transactions(vault_id):
     # Transactions
     # ==================================
 
-    if month_filter == "LAST_3_MONTHS":
+    transactions = get_filtered_transactions(
+        vault_id=vault_id,
+        month=(
+            None
+            if month_filter == "All"
+            else month_filter
+        ),
+        category=(
+            None
+            if category_filter == "All"
+            else category_filter
+        ),
+        account=(
+            None
+            if account_filter == "All"
+            else account_filter
+        ),
+        search=search_text,
+        sort_by=sort_option
+    )
 
-        all_transactions = get_filtered_transactions(
-            vault_id=vault_id,
-            month=None,
-            category=(
-                None
-                if category_filter == "All"
-                else category_filter
-            ),
-            account=(
-                None
-                if account_filter == "All"
-                else account_filter
-            ),
-            search=search_text,
-            sort_by=sort_option
-        )
-        
-        cutoff_date = (
-            today - relativedelta(months=3)
-        ).date()
+    if not transactions:
 
-        transactions = [
-            tx
-            for tx in all_transactions
-            if datetime.strptime(
-                tx[1],
-                "%Y-%m-%d"
-            ).date() >= cutoff_date
-        ]
-    elif month_filter == "THIS_YEAR":
-
-        all_transactions = get_filtered_transactions(
-            vault_id=vault_id,
-            month=None,
-            category=(
-                None
-                if category_filter == "All"
-                else category_filter
-            ),
-            account=(
-                None
-                if account_filter == "All"
-                else account_filter
-            ),
-            search=search_text,
-            sort_by=sort_option
+        st.info(
+            "No transactions found."
         )
 
-        current_year = today.year
-
-        transactions = [
-            tx
-            for tx in all_transactions
-            if datetime.strptime(
-                tx[1],
-                "%Y-%m-%d"
-            ).year == current_year
-        ]
-    else:
-
-        transactions = get_filtered_transactions(
-            vault_id=vault_id,
-            month=(
-                None
-                if month_filter == "All"
-                else month_filter
-            ),
-            category=(
-                None
-                if category_filter == "All"
-                else category_filter
-            ),
-            account=(
-                None
-                if account_filter == "All"
-                else account_filter
-            ),
-            search=search_text,
-            sort_by=sort_option
-        )
-
-        if not transactions:
-
-            st.info(
-                "No transactions found."
-            )
-
-            return
+        return
 
     if (
             date_range_filter == "Custom"

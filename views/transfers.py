@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from db.accounts import (
-    get_account_balance,
+    get_account_balances,
     get_accounts
 )
 from db.transfers import (
@@ -238,6 +238,9 @@ def render_transfer_form(
     vault_id,
     accounts
 ):
+    account_balances = get_account_balances(
+        vault_id
+    )
 
     account_map = {
         account[1]: account[0]
@@ -273,8 +276,9 @@ def render_transfer_form(
             key="transfer_from_account"
         )
 
-        from_balance = get_account_balance(
-            account_map[from_account]
+        from_balance = account_balances.get(
+            account_map[from_account],
+            0
         )
 
         st.markdown(
@@ -300,8 +304,9 @@ def render_transfer_form(
             key="transfer_to_account"
         )
 
-        to_balance = get_account_balance(
-            account_map[to_account]
+        to_balance = account_balances.get(
+            account_map[to_account],
+            0
         )
 
         st.markdown(

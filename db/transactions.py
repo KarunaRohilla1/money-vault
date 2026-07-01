@@ -80,6 +80,51 @@ def get_transactions(vault_id):
 
     return transactions
 
+
+@cache_data(ttl=60)
+def get_recent_activity_transactions(vault_id, limit=5):
+
+    conn = get_connection()
+
+    transactions = conn.execute(
+        """
+        SELECT
+            t.id,
+            t.date,
+            a.name,
+            COALESCE(c.emoji || ' ' || c.name, t.transaction_type),
+            t.amount,
+            t.transaction_type,
+            t.notes,
+            t.transfer_group_id
+
+        FROM transactions t
+
+        LEFT JOIN accounts a
+            ON t.account_id = a.id
+
+        LEFT JOIN categories c
+            ON t.category_id = c.id
+
+        WHERE t.vault_id = ?
+        AND t.is_deleted = 0
+        AND t.amount != 0
+        AND t.transaction_type NOT IN ('Transfer In', 'Transfer Out')
+
+        ORDER BY t.date DESC, t.id DESC
+        LIMIT ?
+        """,
+        (
+            vault_id,
+            limit
+        )
+    ).fetchall()
+
+    conn.close()
+
+    return transactions
+
+
 @cache_data(ttl=60)
 def get_filtered_transactions(
     vault_id,
@@ -117,7 +162,17 @@ def get_filtered_transactions(
 
     params = [vault_id]
 
-    if month:
+    if month == "LAST_3_MONTHS":
+        query += """
+        AND t.date::date >= (CURRENT_DATE - INTERVAL '3 months')::date
+        """
+
+    elif month == "THIS_YEAR":
+        query += """
+        AND EXTRACT(YEAR FROM t.date::date) = EXTRACT(YEAR FROM CURRENT_DATE)
+        """
+
+    elif month:
         query += """
         AND to_char(t.date::date, 'YYYY-MM') = ?
         """

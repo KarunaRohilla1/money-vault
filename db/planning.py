@@ -409,6 +409,65 @@ def get_income_status(
     return row
 
 
+@cache_data(ttl=60)
+def get_planning_activity_statuses(vault_id, month, year):
+
+    conn = get_connection()
+
+    rows = conn.execute(
+        """
+        SELECT
+            'income',
+            i.id,
+            s.actual_amount,
+            COALESCE(s.status, 'PENDING'),
+            s.notes
+        FROM income_templates i
+        LEFT JOIN income_status s
+            ON s.income_template_id = i.id
+            AND s.month = ?
+            AND s.year = ?
+        WHERE i.vault_id = ?
+        AND i.is_active = 1
+
+        UNION ALL
+
+        SELECT
+            'commitment',
+            c.id,
+            s.actual_amount,
+            COALESCE(s.status, 'PENDING'),
+            s.notes
+        FROM commitments c
+        LEFT JOIN obligation_status s
+            ON s.commitment_id = c.id
+            AND s.month = ?
+            AND s.year = ?
+        WHERE c.vault_id = ?
+        AND c.is_active = 1
+        """,
+        (
+            month,
+            year,
+            vault_id,
+            month,
+            year,
+            vault_id
+        )
+    ).fetchall()
+
+    conn.close()
+
+    return {
+        (row[0], row[1]): (
+            row[2],
+            row[3],
+            row[4]
+        )
+        for row in rows
+    }
+
+
 def save_income_status_with_cursor(
     cursor,
     income_template_id,
@@ -691,57 +750,71 @@ def get_next_month(month, year):
 @cache_data(ttl=60)
 def get_monthly_planning_totals(vault_id, month, year):
 
-    income = 0
+    conn = get_connection()
 
-    for template in get_income_templates(vault_id):
-
-        base_amount = template[2]
-        status = get_income_status(
-            template[0],
+    row = conn.execute(
+        """
+        WITH income_total AS (
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN s.status = 'CANCELLED' THEN 0
+                    ELSE COALESCE(s.actual_amount, i.amount)
+                END
+            ), 0) AS amount
+            FROM income_templates i
+            LEFT JOIN income_status s
+                ON s.income_template_id = i.id
+                AND s.month = ?
+                AND s.year = ?
+            WHERE i.vault_id = ?
+            AND i.is_active = 1
+        ),
+        commitment_totals AS (
+            SELECT
+                COALESCE(SUM(
+                    CASE
+                        WHEN s.status = 'CANCELLED' THEN 0
+                        ELSE COALESCE(s.actual_amount, c.amount)
+                    END
+                ), 0) AS planned,
+                COALESCE(SUM(
+                    CASE
+                        WHEN COALESCE(s.status, 'PENDING') = 'PENDING'
+                            THEN COALESCE(s.actual_amount, c.amount)
+                        ELSE 0
+                    END
+                ), 0) AS remaining
+            FROM commitments c
+            LEFT JOIN obligation_status s
+                ON s.commitment_id = c.id
+                AND s.month = ?
+                AND s.year = ?
+            WHERE c.vault_id = ?
+            AND c.is_active = 1
+        )
+        SELECT
+            income_total.amount,
+            commitment_totals.planned,
+            commitment_totals.remaining
+        FROM income_total
+        CROSS JOIN commitment_totals
+        """,
+        (
             month,
-            year
-        )
-
-        if status and status[1] == "CANCELLED":
-            continue
-
-        income += (
-            status[0]
-            if status and status[0] is not None
-            else base_amount
-        )
-
-    planned_commitments = 0
-    remaining_commitments = 0
-
-    for commitment in get_commitments(vault_id):
-
-        base_amount = commitment[2]
-        status = get_obligation_status(
-            commitment[0],
+            year,
+            vault_id,
             month,
-            year
+            year,
+            vault_id
         )
+    ).fetchone()
 
-        if status and status[1] == "CANCELLED":
-            continue
-
-        effective_amount = (
-            status[0]
-            if status and status[0] is not None
-            else base_amount
-        )
-
-        planned_commitments += effective_amount
-
-        if not status or status[1] == "PENDING":
-
-            remaining_commitments += effective_amount
+    conn.close()
 
     return {
-        "income": income,
-        "planned_commitments": planned_commitments,
-        "remaining_commitments": remaining_commitments
+        "income": row[0],
+        "planned_commitments": row[1],
+        "remaining_commitments": row[2]
     }
 
 

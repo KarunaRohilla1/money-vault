@@ -28,11 +28,10 @@ from db.planning import (
     finalize_month,
     get_commitments,
     get_cycle,
-    get_income_status,
     get_income_templates,
     get_monthly_planning_totals,
     get_next_month,
-    get_obligation_status,
+    get_planning_activity_statuses,
     save_income_status,
     save_obligation_status,
     update_commitment,
@@ -177,6 +176,11 @@ def show_planning(vault_id):
     selected_date.year)
 
     monthly_totals = get_monthly_planning_totals(
+        vault_id,
+        selected_date.month,
+        selected_date.year
+    )
+    activity_statuses = get_planning_activity_statuses(
         vault_id,
         selected_date.month,
         selected_date.year
@@ -354,10 +358,8 @@ def show_planning(vault_id):
 
             if activity["type"] == "income":
 
-                status_row = get_income_status(
-                    activity["id"],
-                    selected_date.month,
-                    selected_date.year
+                status_row = activity_statuses.get(
+                    ("income", activity["id"])
                 )
 
                 if status_row:
@@ -418,10 +420,8 @@ def show_planning(vault_id):
 
             else:
 
-                status_row = get_obligation_status(
-                    activity["id"],
-                    selected_date.month,
-                    selected_date.year
+                status_row = activity_statuses.get(
+                    ("commitment", activity["id"])
                 )
 
                 if status_row:
@@ -870,10 +870,8 @@ def show_planning(vault_id):
 
             if activity["type"] == "income":
 
-                status_row = get_income_status(
-                    activity["id"],
-                    selected_date.month,
-                    selected_date.year
+                status_row = activity_statuses.get(
+                    ("income", activity["id"])
                 )
 
                 if (
@@ -898,10 +896,8 @@ def show_planning(vault_id):
 
             else:
 
-                status_row = get_obligation_status(
-                    activity["id"],
-                    selected_date.month,
-                    selected_date.year
+                status_row = activity_statuses.get(
+                    ("commitment", activity["id"])
                 )
 
                 if (

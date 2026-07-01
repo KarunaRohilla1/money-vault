@@ -40,7 +40,7 @@ def create_vault_dialog():
 @st.dialog("Edit Vault")
 def edit_vault_dialog(vault):
     vault_id, name, is_admin, month_start_day, vault_type = vault
-    vaults = get_all_vaults()
+    vaults = get_all_vaults() if is_admin else []
     share_options = vault_share_options(
         vaults,
         vault_id

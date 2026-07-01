@@ -1,3 +1,5 @@
+import os
+
 import streamlit as st
 
 from db.schema import (
@@ -20,20 +22,26 @@ from views.transfers import show_transfers
 from views.wishlist import show_wishlist
 from views.reports import show_reports
 
-def load_css():
+@st.cache_data(show_spinner=False)
+def get_css():
     with open(
         "styles/main.css", encoding="utf-8"
     ) as f:
-        st.markdown(
-            f"<style>{f.read()}</style>",
-            unsafe_allow_html=True
-        )
+        return f.read()
+
+
+def load_css():
+    st.markdown(
+        f"<style>{get_css()}</style>",
+        unsafe_allow_html=True
+    )
 
 
 @st.cache_resource(show_spinner=False)
 def bootstrap_database():
-    initialize_database()
-    migrate_database()
+    if os.environ.get("MONEY_VAULT_RUN_RUNTIME_MIGRATIONS") == "1":
+        initialize_database()
+        migrate_database()
     return True
 
 

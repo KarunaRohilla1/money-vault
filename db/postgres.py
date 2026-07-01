@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from functools import lru_cache
 
 try:
     import psycopg2
@@ -132,6 +133,7 @@ def translate_sql(sql):
     return convert_placeholders(sql)
 
 
+@lru_cache(maxsize=512)
 def convert_placeholders(sql):
     result = []
     in_single_quote = False
