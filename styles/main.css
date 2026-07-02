@@ -3633,3 +3633,372 @@ div[data-testid="stPopover"] button {
         font-size: 34px;
     }
 }
+
+/* =====================================================
+   MOBILE RESPONSIVENESS ONLY
+   Desktop rules above remain unchanged.
+===================================================== */
+
+@media (max-width: 768px) {
+
+    html,
+    body,
+    .stApp {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+
+    .block-container {
+        max-width: 100%;
+        padding: 1.2rem 0.85rem 2rem;
+    }
+
+    section[data-testid="stSidebar"][aria-expanded="false"],
+    section[data-testid="stSidebar"]:not([aria-expanded="true"]) {
+        min-width: 0 !important;
+        width: 0 !important;
+        max-width: 0 !important;
+        margin-left: 0 !important;
+        transform: translateX(-100%) !important;
+        border-right: 0 !important;
+        box-shadow: none !important;
+        overflow: hidden !important;
+        pointer-events: none !important;
+    }
+
+    section[data-testid="stSidebar"][aria-expanded="false"] > div,
+    section[data-testid="stSidebar"]:not([aria-expanded="true"]) > div {
+        display: none !important;
+    }
+
+    div[data-testid="stHorizontalBlock"] {
+        gap: 0.75rem !important;
+        flex-wrap: wrap;
+    }
+
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        min-width: 100% !important;
+        width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+
+    button,
+    div[data-testid="stButton"] button,
+    div[data-testid="stDownloadButton"] button,
+    div[data-testid="baseButton-secondary"],
+    div[data-testid="stFormSubmitButton"] button {
+        min-height: 46px;
+        white-space: normal;
+    }
+
+    input,
+    textarea,
+    div[data-baseweb="select"] > div,
+    div[data-testid="stDateInput"] input,
+    div[data-testid="stNumberInput"] input {
+        min-height: 46px !important;
+        font-size: 16px !important;
+    }
+
+    div[data-testid="stDialog"] div[role="dialog"] {
+        width: calc(100vw - 1.5rem) !important;
+        max-width: calc(100vw - 1.5rem) !important;
+        margin: 0.75rem auto !important;
+    }
+
+    div[data-testid="stDialog"] div[role="dialog"] > div {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    div[data-testid="stPlotlyChart"],
+    div[data-testid="stPlotlyChart"] > div,
+    div[data-testid="stPlotlyChart"] iframe {
+        max-width: 100% !important;
+        overflow: hidden;
+    }
+
+    .dashboard-header {
+        margin-bottom: 18px;
+    }
+
+    .dashboard-header h1 {
+        font-size: 42px;
+        letter-spacing: 0;
+        line-height: 1.05;
+    }
+
+    .dashboard-header h2,
+    .mv-transfer-page-title h2,
+    .mv-report-title h2,
+    .mv-wishlist-title h2,
+    .mv-settings-title h2 {
+        font-size: 32px;
+        line-height: 1.1;
+    }
+
+    .dashboard-header p,
+    .mv-transfer-page-title p,
+    .mv-report-title p,
+    .mv-wishlist-title p,
+    .mv-settings-title p {
+        font-size: 15px;
+    }
+
+    .hero-card,
+    .metric-card,
+    .widget-card,
+    .mv-report-card,
+    .mv-wishlist-summary,
+    .mv-settings-card,
+    .mv-transfer-info,
+    .mv-onboarding-welcome,
+    .mv-onboarding-complete {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .hero-card {
+        min-height: 260px;
+        padding: 28px 24px;
+        border-radius: 24px;
+    }
+
+    .hero-card .hero-value {
+        font-size: 56px;
+    }
+
+    .metric-card {
+        min-height: 120px;
+    }
+
+    .section-main-title {
+        font-size: 27px;
+        line-height: 1.15;
+    }
+
+    .cycle-hero {
+        display: block;
+        padding: 22px;
+        border-radius: 22px;
+    }
+
+    .cycle-status,
+    .cycle-metric {
+        width: 100%;
+        padding-left: 0;
+    }
+
+    .cycle-divider {
+        width: 100%;
+        height: 1px;
+        margin: 18px 0;
+    }
+
+    .income-value,
+    .reserved-value,
+    .pool-value {
+        font-size: 40px;
+        line-height: 1.05;
+    }
+
+    .glass-month {
+        height: auto;
+        min-height: 52px;
+        font-size: 20px;
+        padding: 10px 14px;
+    }
+
+    div[class*="st-key-month_prev"] button,
+    div[class*="st-key-month_next"] button {
+        width: 100%;
+        height: 52px;
+    }
+
+    .obligation-header,
+    .table-header,
+    .mv-transfer-table-head,
+    .mv-wishlist-table-head,
+    .mv-settings-table-head {
+        display: none;
+    }
+
+    .commitment-row,
+    .mv-wishlist-row,
+    .mv-report-review-row,
+    .mv-report-category-row {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .mv-wishlist-row {
+        padding: 14px 0;
+    }
+
+    .mv-wishlist-money {
+        text-align: left;
+    }
+
+    .mv-wishlist-item-cell,
+    .mv-transfer-account,
+    .mv-settings-vault-name,
+    .mv-wishlist-title,
+    .mv-wishlist-footer,
+    .mv-transfer-info {
+        align-items: flex-start;
+    }
+
+    .mv-transfer-arrow {
+        width: 100%;
+        margin-top: 0;
+        border-radius: 14px;
+    }
+
+    .mv-transfer-date,
+    .mv-transfer-note,
+    .mv-transfer-amount,
+    .mv-transfer-account {
+        overflow-wrap: anywhere;
+    }
+
+    .mv-report-review-row strong,
+    .mv-report-category-row strong,
+    .mv-report-category-row em {
+        text-align: left;
+    }
+
+    .mv-report-card,
+    .mv-wishlist-summary {
+        min-height: auto;
+        padding: 20px;
+    }
+
+    .mv-report-card-value,
+    .mv-wishlist-summary-value {
+        font-size: 24px;
+        overflow-wrap: anywhere;
+    }
+
+    .mv-assets-hero {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 20px;
+        padding: 28px 24px;
+    }
+
+    .mv-assets-divider {
+        width: 100%;
+        height: 1px;
+    }
+
+    .mv-assets-value,
+    .mv-assets-stat-number {
+        font-size: 42px;
+    }
+
+    .mv-assets-stat {
+        min-width: 0;
+        align-items: flex-start;
+    }
+
+    div[data-testid="stHorizontalBlock"]:has(.mv-account-avatar),
+    div[data-testid="stHorizontalBlock"]:has(.mv-category-avatar) {
+        padding: 16px;
+    }
+
+    .mv-category-pill-wrapper {
+        margin-left: 0;
+        justify-content: flex-start;
+    }
+
+    .transaction-card {
+        width: 100%;
+    }
+
+    .transaction-header {
+        align-items: flex-start;
+        gap: 14px;
+    }
+
+    .transaction-right {
+        text-align: left;
+        margin-top: 10px;
+    }
+
+    .timeline-column {
+        display: none;
+    }
+}
+
+@media (max-width: 480px) {
+
+    .block-container {
+        padding: 0.9rem 0.65rem 1.5rem;
+    }
+
+    .dashboard-header h1 {
+        font-size: 36px;
+    }
+
+    .dashboard-header h2,
+    .mv-transfer-page-title h2,
+    .mv-report-title h2,
+    .mv-wishlist-title h2,
+    .mv-settings-title h2 {
+        font-size: 28px;
+    }
+
+    .hero-card {
+        min-height: 230px;
+        padding: 24px 20px;
+    }
+
+    .hero-card .hero-value {
+        font-size: 48px;
+    }
+
+    .income-value,
+    .reserved-value,
+    .pool-value {
+        font-size: 34px;
+    }
+
+    .mv-onboarding-item {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        padding: 16px;
+    }
+
+    .mv-onboarding-copy,
+    .mv-onboarding-check {
+        grid-column: auto;
+        grid-row: auto;
+    }
+
+    .mv-onboarding-item-title {
+        font-size: 19px;
+    }
+
+    .mv-onboarding-item-body {
+        font-size: 15px;
+    }
+
+    .mv-report-card,
+    .mv-wishlist-summary,
+    .mv-transfer-info,
+    .mv-wishlist-footer {
+        flex-direction: column;
+    }
+
+    .mv-wishlist-thumb,
+    .mv-wishlist-thumb-fallback {
+        width: 56px;
+        height: 56px;
+    }
+
+    div[class*="st-key-edit_wishlist_"] button,
+    div[class*="st-key-delete_wishlist_"] button {
+        width: 100%;
+        min-width: 100%;
+    }
+}

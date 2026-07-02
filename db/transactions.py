@@ -13,118 +13,124 @@ def add_transaction(
 ):
 
     conn = get_connection()
+    try:
 
-    conn.execute(
-        """
-        INSERT INTO transactions
-        (
-            vault_id,
-            account_id,
-            date,
-            amount,
-            category_id,
-            transaction_type,
-            notes
+        conn.execute(
+            """
+            INSERT INTO transactions
+            (
+                vault_id,
+                account_id,
+                date,
+                amount,
+                category_id,
+                transaction_type,
+                notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                vault_id,
+                account_id,
+                date,
+                amount,
+                category_id,
+                transaction_type,
+                notes
+            )
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            vault_id,
-            account_id,
-            date,
-            amount,
-            category_id,
-            transaction_type,
-            notes
-        )
-    )
 
-    conn.commit()
-    conn.close()
-    clear_data_cache()
+        conn.commit()
+        clear_data_cache()
 
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_transactions(vault_id):
 
     conn = get_connection()
+    try:
 
-    transactions = conn.execute(
-        """
-        SELECT
-            t.id,
-            t.date,
-            a.name,
-            COALESCE(c.emoji || ' ' || c.name, t.transaction_type),
-            t.amount,
-            t.transaction_type,
-            t.notes,
-            t.transfer_group_id
+        transactions = conn.execute(
+            """
+            SELECT
+                t.id,
+                t.date,
+                a.name,
+                COALESCE(c.emoji || ' ' || c.name, t.transaction_type),
+                t.amount,
+                t.transaction_type,
+                t.notes,
+                t.transfer_group_id
 
-        FROM transactions t
+            FROM transactions t
 
-        LEFT JOIN accounts a
-            ON t.account_id = a.id
+            LEFT JOIN accounts a
+                ON t.account_id = a.id
 
-        LEFT JOIN categories c
-            ON t.category_id = c.id
+            LEFT JOIN categories c
+                ON t.category_id = c.id
 
-        WHERE t.vault_id = ?
-        AND t.is_deleted = 0
+            WHERE t.vault_id = ?
+            AND t.is_deleted = 0
 
-        ORDER BY t.date DESC, t.id DESC
-        """,
-        (vault_id,)
-    ).fetchall()
-
-    conn.close()
-
-    return transactions
+            ORDER BY t.date DESC, t.id DESC
+            """,
+            (vault_id,)
+        ).fetchall()
 
 
+        return transactions
+
+
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_recent_activity_transactions(vault_id, limit=5):
 
     conn = get_connection()
+    try:
 
-    transactions = conn.execute(
-        """
-        SELECT
-            t.id,
-            t.date,
-            a.name,
-            COALESCE(c.emoji || ' ' || c.name, t.transaction_type),
-            t.amount,
-            t.transaction_type,
-            t.notes,
-            t.transfer_group_id
+        transactions = conn.execute(
+            """
+            SELECT
+                t.id,
+                t.date,
+                a.name,
+                COALESCE(c.emoji || ' ' || c.name, t.transaction_type),
+                t.amount,
+                t.transaction_type,
+                t.notes,
+                t.transfer_group_id
 
-        FROM transactions t
+            FROM transactions t
 
-        LEFT JOIN accounts a
-            ON t.account_id = a.id
+            LEFT JOIN accounts a
+                ON t.account_id = a.id
 
-        LEFT JOIN categories c
-            ON t.category_id = c.id
+            LEFT JOIN categories c
+                ON t.category_id = c.id
 
-        WHERE t.vault_id = ?
-        AND t.is_deleted = 0
-        AND t.amount != 0
-        AND t.transaction_type NOT IN ('Transfer In', 'Transfer Out')
+            WHERE t.vault_id = ?
+            AND t.is_deleted = 0
+            AND t.amount != 0
+            AND t.transaction_type NOT IN ('Transfer In', 'Transfer Out')
 
-        ORDER BY t.date DESC, t.id DESC
-        LIMIT ?
-        """,
-        (
-            vault_id,
-            limit
-        )
-    ).fetchall()
-
-    conn.close()
-
-    return transactions
+            ORDER BY t.date DESC, t.id DESC
+            LIMIT ?
+            """,
+            (
+                vault_id,
+                limit
+            )
+        ).fetchall()
 
 
+        return transactions
+
+
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_filtered_transactions(
     vault_id,
@@ -136,199 +142,204 @@ def get_filtered_transactions(
 ):
 
     conn = get_connection()
+    try:
 
-    query = """
-    SELECT
-        t.id,
-        t.date,
-        a.name,
-        COALESCE(c.emoji || ' ' || c.name, t.transaction_type),
-        t.amount,
-        t.transaction_type,
-        t.notes,
-        t.transfer_group_id
+        query = """
+        SELECT
+            t.id,
+            t.date,
+            a.name,
+            COALESCE(c.emoji || ' ' || c.name, t.transaction_type),
+            t.amount,
+            t.transaction_type,
+            t.notes,
+            t.transfer_group_id
 
-    FROM transactions t
+        FROM transactions t
 
-    LEFT JOIN accounts a
-        ON t.account_id = a.id
+        LEFT JOIN accounts a
+            ON t.account_id = a.id
 
-    LEFT JOIN categories c
-        ON t.category_id = c.id
+        LEFT JOIN categories c
+            ON t.category_id = c.id
 
-    WHERE t.vault_id = ?
-    AND t.is_deleted = 0
-    """
-
-    params = [vault_id]
-
-    if month == "LAST_3_MONTHS":
-        query += """
-        AND t.date::date >= (CURRENT_DATE - INTERVAL '3 months')::date
+        WHERE t.vault_id = ?
+        AND t.is_deleted = 0
         """
 
-    elif month == "THIS_YEAR":
-        query += """
-        AND EXTRACT(YEAR FROM t.date::date) = EXTRACT(YEAR FROM CURRENT_DATE)
-        """
+        params = [vault_id]
 
-    elif month:
-        query += """
-        AND to_char(t.date::date, 'YYYY-MM') = ?
-        """
-        params.append(month)
+        if month == "LAST_3_MONTHS":
+            query += """
+            AND t.date::date >= (CURRENT_DATE - INTERVAL '3 months')::date
+            """
 
-    if category and category != "All":
-        query += """
-        AND c.name = ?
-        """
-        params.append(category)
+        elif month == "THIS_YEAR":
+            query += """
+            AND EXTRACT(YEAR FROM t.date::date) = EXTRACT(YEAR FROM CURRENT_DATE)
+            """
 
-    if account and account != "All":
-        query += """
-        AND a.name = ?
-        """
-        params.append(account)
+        elif month:
+            query += """
+            AND to_char(t.date::date, 'YYYY-MM') = ?
+            """
+            params.append(month)
 
-    if search:
-        query += """
-        AND (
-            LOWER(COALESCE(t.notes,'')) LIKE ?
-            OR LOWER(c.name) LIKE ?
-            OR LOWER(a.name) LIKE ?
-        )
-        """
+        if category and category != "All":
+            query += """
+            AND c.name = ?
+            """
+            params.append(category)
 
-        search_term = f"%{search.lower()}%"
+        if account and account != "All":
+            query += """
+            AND a.name = ?
+            """
+            params.append(account)
 
-        params.extend([
-            search_term,
-            search_term,
-            search_term
-        ])
+        if search:
+            query += """
+            AND (
+                LOWER(COALESCE(t.notes,'')) LIKE ?
+                OR LOWER(c.name) LIKE ?
+                OR LOWER(a.name) LIKE ?
+            )
+            """
 
-    if sort_by == "Oldest":
-        query += """
-        ORDER BY t.date ASC, t.id ASC
-        """
-    elif sort_by == "Amount High":
-        query += """
-        ORDER BY t.amount DESC
-        """
-    elif sort_by == "Amount Low":
-        query += """
-        ORDER BY t.amount ASC
-        """
-    else:
-        query += """
-        ORDER BY t.date DESC, t.id DESC
-        """
+            search_term = f"%{search.lower()}%"
 
-    transactions = conn.execute(
-        query,
-        params
-    ).fetchall()
+            params.extend([
+                search_term,
+                search_term,
+                search_term
+            ])
 
-    conn.close()
+        if sort_by == "Oldest":
+            query += """
+            ORDER BY t.date ASC, t.id ASC
+            """
+        elif sort_by == "Amount High":
+            query += """
+            ORDER BY t.amount DESC
+            """
+        elif sort_by == "Amount Low":
+            query += """
+            ORDER BY t.amount ASC
+            """
+        else:
+            query += """
+            ORDER BY t.date DESC, t.id DESC
+            """
 
-    return transactions
+        transactions = conn.execute(
+            query,
+            params
+        ).fetchall()
 
 
+        return transactions
+
+
+    finally:
+        conn.close()
 def delete_transaction(transaction_id):
 
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    transfer_group = cursor.execute(
-        """
-        SELECT transfer_group_id
-        FROM transactions
-        WHERE id = ?
-        """,
-        (transaction_id,)
-    ).fetchone()
+        transfer_group = cursor.execute(
+            """
+            SELECT transfer_group_id
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,)
+        ).fetchone()
 
-    if (
-        transfer_group
-        and transfer_group[0]
-    ):
+        if (
+            transfer_group
+            and transfer_group[0]
+        ):
+
+            cursor.execute(
+                """
+                DELETE FROM transactions
+                WHERE transfer_group_id = ?
+                """,
+                (transfer_group[0],)
+            )
+
+            conn.commit()
+            clear_data_cache()
+
+            return
 
         cursor.execute(
             """
             DELETE FROM transactions
-            WHERE transfer_group_id = ?
+            WHERE id = ?
             """,
-            (transfer_group[0],)
+            (transaction_id,)
+        )
+
+        cursor.execute(
+            """
+            UPDATE income_status
+            SET
+                actual_amount = NULL,
+                status = 'PENDING',
+                transaction_id = NULL
+            WHERE transaction_id = ?
+            """,
+            (transaction_id,)
+        )
+
+        cursor.execute(
+            """
+            UPDATE obligation_status
+            SET
+                actual_amount = NULL,
+                status = 'PENDING',
+                transaction_id = NULL
+            WHERE transaction_id = ?
+            """,
+            (transaction_id,)
         )
 
         conn.commit()
-        conn.close()
         clear_data_cache()
 
-        return
-
-    cursor.execute(
-        """
-        DELETE FROM transactions
-        WHERE id = ?
-        """,
-        (transaction_id,)
-    )
-
-    cursor.execute(
-        """
-        UPDATE income_status
-        SET
-            actual_amount = NULL,
-            status = 'PENDING',
-            transaction_id = NULL
-        WHERE transaction_id = ?
-        """,
-        (transaction_id,)
-    )
-
-    cursor.execute(
-        """
-        UPDATE obligation_status
-        SET
-            actual_amount = NULL,
-            status = 'PENDING',
-            transaction_id = NULL
-        WHERE transaction_id = ?
-        """,
-        (transaction_id,)
-    )
-
-    conn.commit()
-    conn.close()
-    clear_data_cache()
-
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_transaction_by_id(transaction_id):
 
     conn = get_connection()
+    try:
 
-    transaction = conn.execute(
-        """
-        SELECT
-            id,
-            account_id,
-            category_id,
-            date,
-            amount,
-            transaction_type,
-            notes
-        FROM transactions
-        WHERE id = ?
-        """,
-        (transaction_id,)
-    ).fetchone()
-
-    conn.close()
-
-    return transaction
+        transaction = conn.execute(
+            """
+            SELECT
+                id,
+                account_id,
+                category_id,
+                date,
+                amount,
+                transaction_type,
+                notes
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,)
+        ).fetchone()
 
 
+        return transaction
+
+
+    finally:
+        conn.close()
 def update_transaction(
     transaction_id,
     account_id,
@@ -340,55 +351,58 @@ def update_transaction(
 ):
 
     conn = get_connection()
+    try:
 
-    if transaction_type:
+        if transaction_type:
 
-        conn.execute(
-            """
-            UPDATE transactions
-            SET
-                account_id = ?,
-                category_id = ?,
-                date = ?,
-                amount = ?,
-                transaction_type = ?,
-                notes = ?
-            WHERE id = ?
-            """,
-            (
-                account_id,
-                category_id,
-                date,
-                amount,
-                transaction_type,
-                notes,
-                transaction_id
+            conn.execute(
+                """
+                UPDATE transactions
+                SET
+                    account_id = ?,
+                    category_id = ?,
+                    date = ?,
+                    amount = ?,
+                    transaction_type = ?,
+                    notes = ?
+                WHERE id = ?
+                """,
+                (
+                    account_id,
+                    category_id,
+                    date,
+                    amount,
+                    transaction_type,
+                    notes,
+                    transaction_id
+                )
             )
-        )
 
-    else:
+        else:
 
-        conn.execute(
-            """
-            UPDATE transactions
-            SET
-                account_id = ?,
-                category_id = ?,
-                date = ?,
-                amount = ?,
-                notes = ?
-            WHERE id = ?
-            """,
-            (
-                account_id,
-                category_id,
-                date,
-                amount,
-                notes,
-                transaction_id
+            conn.execute(
+                """
+                UPDATE transactions
+                SET
+                    account_id = ?,
+                    category_id = ?,
+                    date = ?,
+                    amount = ?,
+                    notes = ?
+                WHERE id = ?
+                """,
+                (
+                    account_id,
+                    category_id,
+                    date,
+                    amount,
+                    notes,
+                    transaction_id
+                )
             )
-        )
 
-    conn.commit()
-    conn.close()
-    clear_data_cache()
+        conn.commit()
+        clear_data_cache()
+
+    finally:
+        conn.close()

@@ -20,106 +20,112 @@ def add_commitment(
 ):
 
     conn = get_connection()
+    try:
 
-    conn.execute(
-        """
-        INSERT INTO commitments
-        (
-            vault_id,
-            name,
-            amount,
-            due_day,
-            account_id
+        conn.execute(
+            """
+            INSERT INTO commitments
+            (
+                vault_id,
+                name,
+                amount,
+                due_day,
+                account_id
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                vault_id,
+                name,
+                amount,
+                due_day,
+                account_id
+            )
         )
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (
-            vault_id,
-            name,
-            amount,
-            due_day,
-            account_id
-        )
-    )
 
-    conn.commit()
-    conn.close()
-    clear_data_cache()
+        conn.commit()
+        clear_data_cache()
 
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_commitments(vault_id):
 
     conn = get_connection()
+    try:
 
-    commitments = conn.execute(
-        """
-        SELECT
-            c.id,
-            c.name,
-            c.amount,
-            c.due_day,
-            a.name,
-            c.account_id
+        commitments = conn.execute(
+            """
+            SELECT
+                c.id,
+                c.name,
+                c.amount,
+                c.due_day,
+                a.name,
+                c.account_id
 
-        FROM commitments c
+            FROM commitments c
 
-        LEFT JOIN accounts a
-            ON c.account_id = a.id
+            LEFT JOIN accounts a
+                ON c.account_id = a.id
 
-        WHERE c.vault_id = ?
-        AND c.is_active = 1
+            WHERE c.vault_id = ?
+            AND c.is_active = 1
 
-        ORDER BY c.due_day
-        """,
-        (vault_id,)
-    ).fetchall()
-
-    conn.close()
-
-    return commitments
+            ORDER BY c.due_day
+            """,
+            (vault_id,)
+        ).fetchall()
 
 
+        return commitments
+
+
+    finally:
+        conn.close()
 def delete_commitment(
     commitment_id
 ):
 
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        DELETE FROM transactions
-        WHERE id IN (
-            SELECT transaction_id
-            FROM obligation_status
-            WHERE commitment_id = ?
-            AND transaction_id IS NOT NULL
+        cursor.execute(
+            """
+            DELETE FROM transactions
+            WHERE id IN (
+                SELECT transaction_id
+                FROM obligation_status
+                WHERE commitment_id = ?
+                AND transaction_id IS NOT NULL
+            )
+            """,
+            (commitment_id,)
         )
-        """,
-        (commitment_id,)
-    )
 
-    cursor.execute(
-        """
-        DELETE FROM obligation_status
-        WHERE commitment_id = ?
-        """,
-        (commitment_id,)
-    )
+        cursor.execute(
+            """
+            DELETE FROM obligation_status
+            WHERE commitment_id = ?
+            """,
+            (commitment_id,)
+        )
 
-    cursor.execute(
-        """
-        DELETE FROM commitments
-        WHERE id = ?
-        """,
-        (commitment_id,)
-    )
+        cursor.execute(
+            """
+            DELETE FROM commitments
+            WHERE id = ?
+            """,
+            (commitment_id,)
+        )
 
-    conn.commit()
-    conn.close()
-    clear_data_cache()
+        conn.commit()
+        clear_data_cache()
 
 
+    finally:
+        conn.close()
 def update_commitment(
     commitment_id,
     name,
@@ -129,49 +135,53 @@ def update_commitment(
 ):
 
     conn = get_connection()
+    try:
 
-    conn.execute(
-        """
-        UPDATE commitments
-        SET
-            name = ?,
-            amount = ?,
-            due_day = ?,
-            account_id = ?
-        WHERE id = ?
-        """,
-        (
-            name,
-            amount,
-            due_day,
-            account_id,
-            commitment_id
+        conn.execute(
+            """
+            UPDATE commitments
+            SET
+                name = ?,
+                amount = ?,
+                due_day = ?,
+                account_id = ?
+            WHERE id = ?
+            """,
+            (
+                name,
+                amount,
+                due_day,
+                account_id,
+                commitment_id
+            )
         )
-    )
 
-    conn.commit()
-    conn.close()
-    clear_data_cache()
+        conn.commit()
+        clear_data_cache()
 
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_total_commitments(vault_id):
 
     conn = get_connection()
+    try:
 
-    total = conn.execute(
-        """
-        SELECT
-            COALESCE(SUM(amount), 0)
-        FROM commitments
-        WHERE vault_id = ?
-        """,
-        (vault_id,)
-    ).fetchone()[0]
+        total = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(amount), 0)
+            FROM commitments
+            WHERE vault_id = ?
+            """,
+            (vault_id,)
+        ).fetchone()[0]
 
-    conn.close()
 
-    return total
+        return total
 
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_obligation_status(
     commitment_id,
@@ -179,30 +189,32 @@ def get_obligation_status(
     year
 ):
     conn = get_connection()
+    try:
 
-    row = conn.execute(
-        """
-        SELECT
-            actual_amount,
-            status,
-            notes
-        FROM obligation_status
-        WHERE commitment_id = ?
-        AND month = ?
-        AND year = ?
-        """,
-        (
-            commitment_id,
-            month,
-            year
-        )
-    ).fetchone()
-
-    conn.close()
-
-    return row
+        row = conn.execute(
+            """
+            SELECT
+                actual_amount,
+                status,
+                notes
+            FROM obligation_status
+            WHERE commitment_id = ?
+            AND month = ?
+            AND year = ?
+            """,
+            (
+                commitment_id,
+                month,
+                year
+            )
+        ).fetchone()
 
 
+        return row
+
+
+    finally:
+        conn.close()
 def save_obligation_status_with_cursor(
     cursor,
     commitment_id,
@@ -383,91 +395,95 @@ def get_income_status(
 ):
 
     conn = get_connection()
+    try:
 
-    row = conn.execute(
-        """
-        SELECT
-            actual_amount,
-            status,
-            notes
+        row = conn.execute(
+            """
+            SELECT
+                actual_amount,
+                status,
+                notes
 
-        FROM income_status
+            FROM income_status
 
-        WHERE income_template_id = ?
-        AND month = ?
-        AND year = ?
-        """,
-        (
-            income_template_id,
-            month,
-            year
-        )
-    ).fetchone()
-
-    conn.close()
-
-    return row
+            WHERE income_template_id = ?
+            AND month = ?
+            AND year = ?
+            """,
+            (
+                income_template_id,
+                month,
+                year
+            )
+        ).fetchone()
 
 
+        return row
+
+
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_planning_activity_statuses(vault_id, month, year):
 
     conn = get_connection()
+    try:
 
-    rows = conn.execute(
-        """
-        SELECT
-            'income',
-            i.id,
-            s.actual_amount,
-            COALESCE(s.status, 'PENDING'),
-            s.notes
-        FROM income_templates i
-        LEFT JOIN income_status s
-            ON s.income_template_id = i.id
-            AND s.month = ?
-            AND s.year = ?
-        WHERE i.vault_id = ?
-        AND i.is_active = 1
+        rows = conn.execute(
+            """
+            SELECT
+                'income',
+                i.id,
+                s.actual_amount,
+                COALESCE(s.status, 'PENDING'),
+                s.notes
+            FROM income_templates i
+            LEFT JOIN income_status s
+                ON s.income_template_id = i.id
+                AND s.month = ?
+                AND s.year = ?
+            WHERE i.vault_id = ?
+            AND i.is_active = 1
 
-        UNION ALL
+            UNION ALL
 
-        SELECT
-            'commitment',
-            c.id,
-            s.actual_amount,
-            COALESCE(s.status, 'PENDING'),
-            s.notes
-        FROM commitments c
-        LEFT JOIN obligation_status s
-            ON s.commitment_id = c.id
-            AND s.month = ?
-            AND s.year = ?
-        WHERE c.vault_id = ?
-        AND c.is_active = 1
-        """,
-        (
-            month,
-            year,
-            vault_id,
-            month,
-            year,
-            vault_id
-        )
-    ).fetchall()
-
-    conn.close()
-
-    return {
-        (row[0], row[1]): (
-            row[2],
-            row[3],
-            row[4]
-        )
-        for row in rows
-    }
+            SELECT
+                'commitment',
+                c.id,
+                s.actual_amount,
+                COALESCE(s.status, 'PENDING'),
+                s.notes
+            FROM commitments c
+            LEFT JOIN obligation_status s
+                ON s.commitment_id = c.id
+                AND s.month = ?
+                AND s.year = ?
+            WHERE c.vault_id = ?
+            AND c.is_active = 1
+            """,
+            (
+                month,
+                year,
+                vault_id,
+                month,
+                year,
+                vault_id
+            )
+        ).fetchall()
 
 
+        return {
+            (row[0], row[1]): (
+                row[2],
+                row[3],
+                row[4]
+            )
+            for row in rows
+        }
+
+
+    finally:
+        conn.close()
 def save_income_status_with_cursor(
     cursor,
     income_template_id,
@@ -651,79 +667,19 @@ def get_cycle(
 ):
 
     conn = get_connection()
+    try:
 
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT *
-
-        FROM monthly_cycles
-
-        WHERE vault_id=?
-        AND month=?
-        AND year=?
-        """,
-        (
-            vault_id,
-            month,
-            year
-        )
-    )
-
-    cycle = cursor.fetchone()
-
-    conn.close()
-
-    return cycle
-
-
-def create_cycle(vault_id, month, year):
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    today = datetime.now()
-
-    if year == today.year and month == today.month:
-        status = "ACTIVE"
-    else:
-        status = "PLANNED"
-
-    cursor.execute(
-        """
-        INSERT INTO monthly_cycles
-        (
-            vault_id,
-            month,
-            year,
-            status
-        )
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT (vault_id, month, year) DO NOTHING
-        """,
-        (
-            vault_id,
-            month,
-            year,
-            status
-        )
-    )
-    changed_rows = cursor.rowcount
-
-    # If this month already existed as PLANNED and it has now
-    # become the current month, activate it automatically.
-
-    if status == "ACTIVE":
+        cursor = conn.cursor()
 
         cursor.execute(
             """
-            UPDATE monthly_cycles
-            SET status = 'ACTIVE'
-            WHERE vault_id = ?
-            AND month = ?
-            AND year = ?
-            AND status = 'PLANNED'
+            SELECT *
+
+            FROM monthly_cycles
+
+            WHERE vault_id=?
+            AND month=?
+            AND year=?
             """,
             (
                 vault_id,
@@ -731,14 +687,78 @@ def create_cycle(vault_id, month, year):
                 year
             )
         )
-        changed_rows += cursor.rowcount
 
-    conn.commit()
-    conn.close()
-    if changed_rows:
-        clear_data_cache()
+        cycle = cursor.fetchone()
 
 
+        return cycle
+
+
+    finally:
+        conn.close()
+def create_cycle(vault_id, month, year):
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        today = datetime.now()
+
+        if year == today.year and month == today.month:
+            status = "ACTIVE"
+        else:
+            status = "PLANNED"
+
+        cursor.execute(
+            """
+            INSERT INTO monthly_cycles
+            (
+                vault_id,
+                month,
+                year,
+                status
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (vault_id, month, year) DO NOTHING
+            """,
+            (
+                vault_id,
+                month,
+                year,
+                status
+            )
+        )
+        changed_rows = cursor.rowcount
+
+        # If this month already existed as PLANNED and it has now
+        # become the current month, activate it automatically.
+
+        if status == "ACTIVE":
+
+            cursor.execute(
+                """
+                UPDATE monthly_cycles
+                SET status = 'ACTIVE'
+                WHERE vault_id = ?
+                AND month = ?
+                AND year = ?
+                AND status = 'PLANNED'
+                """,
+                (
+                    vault_id,
+                    month,
+                    year
+                )
+            )
+            changed_rows += cursor.rowcount
+
+        conn.commit()
+        if changed_rows:
+            clear_data_cache()
+
+
+    finally:
+        conn.close()
 def get_next_month(month, year):
 
     if month == 12:
@@ -751,73 +771,75 @@ def get_next_month(month, year):
 def get_monthly_planning_totals(vault_id, month, year):
 
     conn = get_connection()
+    try:
 
-    row = conn.execute(
-        """
-        WITH income_total AS (
-            SELECT COALESCE(SUM(
-                CASE
-                    WHEN s.status = 'CANCELLED' THEN 0
-                    ELSE COALESCE(s.actual_amount, i.amount)
-                END
-            ), 0) AS amount
-            FROM income_templates i
-            LEFT JOIN income_status s
-                ON s.income_template_id = i.id
-                AND s.month = ?
-                AND s.year = ?
-            WHERE i.vault_id = ?
-            AND i.is_active = 1
-        ),
-        commitment_totals AS (
-            SELECT
-                COALESCE(SUM(
+        row = conn.execute(
+            """
+            WITH income_total AS (
+                SELECT COALESCE(SUM(
                     CASE
                         WHEN s.status = 'CANCELLED' THEN 0
-                        ELSE COALESCE(s.actual_amount, c.amount)
+                        ELSE COALESCE(s.actual_amount, i.amount)
                     END
-                ), 0) AS planned,
-                COALESCE(SUM(
-                    CASE
-                        WHEN COALESCE(s.status, 'PENDING') = 'PENDING'
-                            THEN COALESCE(s.actual_amount, c.amount)
-                        ELSE 0
-                    END
-                ), 0) AS remaining
-            FROM commitments c
-            LEFT JOIN obligation_status s
-                ON s.commitment_id = c.id
-                AND s.month = ?
-                AND s.year = ?
-            WHERE c.vault_id = ?
-            AND c.is_active = 1
-        )
-        SELECT
-            income_total.amount,
-            commitment_totals.planned,
-            commitment_totals.remaining
-        FROM income_total
-        CROSS JOIN commitment_totals
-        """,
-        (
-            month,
-            year,
-            vault_id,
-            month,
-            year,
-            vault_id
-        )
-    ).fetchone()
+                ), 0) AS amount
+                FROM income_templates i
+                LEFT JOIN income_status s
+                    ON s.income_template_id = i.id
+                    AND s.month = ?
+                    AND s.year = ?
+                WHERE i.vault_id = ?
+                AND i.is_active = 1
+            ),
+            commitment_totals AS (
+                SELECT
+                    COALESCE(SUM(
+                        CASE
+                            WHEN s.status = 'CANCELLED' THEN 0
+                            ELSE COALESCE(s.actual_amount, c.amount)
+                        END
+                    ), 0) AS planned,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN COALESCE(s.status, 'PENDING') = 'PENDING'
+                                THEN COALESCE(s.actual_amount, c.amount)
+                            ELSE 0
+                        END
+                    ), 0) AS remaining
+                FROM commitments c
+                LEFT JOIN obligation_status s
+                    ON s.commitment_id = c.id
+                    AND s.month = ?
+                    AND s.year = ?
+                WHERE c.vault_id = ?
+                AND c.is_active = 1
+            )
+            SELECT
+                income_total.amount,
+                commitment_totals.planned,
+                commitment_totals.remaining
+            FROM income_total
+            CROSS JOIN commitment_totals
+            """,
+            (
+                month,
+                year,
+                vault_id,
+                month,
+                year,
+                vault_id
+            )
+        ).fetchone()
 
-    conn.close()
 
-    return {
-        "income": row[0],
-        "planned_commitments": row[1],
-        "remaining_commitments": row[2]
-    }
+        return {
+            "income": row[0],
+            "planned_commitments": row[1],
+            "remaining_commitments": row[2]
+        }
 
 
+    finally:
+        conn.close()
 def carry_forward_commitment_with_cursor(
     cursor,
     commitment_id,
@@ -1024,9 +1046,9 @@ def finalize_month(
 ):
 
     conn = get_connection()
-    cursor = conn.cursor()
-
     try:
+        cursor = conn.cursor()
+
         next_month, next_year = get_next_month(
             month,
             year
@@ -1171,65 +1193,69 @@ def add_income_template(
 ):
 
     conn = get_connection()
+    try:
 
-    conn.execute(
-        """
-        INSERT INTO income_templates
-        (
-            vault_id,
-            name,
-            amount,
-            due_day,
-            account_id
+        conn.execute(
+            """
+            INSERT INTO income_templates
+            (
+                vault_id,
+                name,
+                amount,
+                due_day,
+                account_id
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                vault_id,
+                name,
+                amount,
+                due_day,
+                account_id
+            )
         )
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (
-            vault_id,
-            name,
-            amount,
-            due_day,
-            account_id
-        )
-    )
 
-    conn.commit()
-    conn.close()
-    clear_data_cache()
+        conn.commit()
+        clear_data_cache()
 
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_income_templates(vault_id):
 
     conn = get_connection()
+    try:
 
-    rows = conn.execute(
-        """
-        SELECT
-            i.id,
-            i.name,
-            i.amount,
-            i.due_day,
-            a.name,
-            i.account_id
+        rows = conn.execute(
+            """
+            SELECT
+                i.id,
+                i.name,
+                i.amount,
+                i.due_day,
+                a.name,
+                i.account_id
 
-        FROM income_templates i
+            FROM income_templates i
 
-        LEFT JOIN accounts a
-            ON i.account_id = a.id
+            LEFT JOIN accounts a
+                ON i.account_id = a.id
 
-        WHERE i.vault_id = ?
-        AND i.is_active = 1
+            WHERE i.vault_id = ?
+            AND i.is_active = 1
 
-        ORDER BY i.due_day
-        """,
-        (vault_id,)
-    ).fetchall()
-
-    conn.close()
-
-    return rows
+            ORDER BY i.due_day
+            """,
+            (vault_id,)
+        ).fetchall()
 
 
+        return rows
+
+
+    finally:
+        conn.close()
 def update_income_template(
     template_id,
     name,
@@ -1239,89 +1265,96 @@ def update_income_template(
 ):
 
     conn = get_connection()
+    try:
 
-    conn.execute(
-        """
-        UPDATE income_templates
-        SET
-            name = ?,
-            amount = ?,
-            due_day = ?,
-            account_id = ?
-        WHERE id = ?
-        """,
-        (
-            name,
-            amount,
-            due_day,
-            account_id,
-            template_id
+        conn.execute(
+            """
+            UPDATE income_templates
+            SET
+                name = ?,
+                amount = ?,
+                due_day = ?,
+                account_id = ?
+            WHERE id = ?
+            """,
+            (
+                name,
+                amount,
+                due_day,
+                account_id,
+                template_id
+            )
         )
-    )
 
-    conn.commit()
-    conn.close()
-    clear_data_cache()
+        conn.commit()
+        clear_data_cache()
 
 
+    finally:
+        conn.close()
 def delete_income_template(
     template_id
 ):
 
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        DELETE FROM transactions
-        WHERE id IN (
-            SELECT transaction_id
-            FROM income_status
-            WHERE income_template_id = ?
-            AND transaction_id IS NOT NULL
+        cursor.execute(
+            """
+            DELETE FROM transactions
+            WHERE id IN (
+                SELECT transaction_id
+                FROM income_status
+                WHERE income_template_id = ?
+                AND transaction_id IS NOT NULL
+            )
+            """,
+            (template_id,)
         )
-        """,
-        (template_id,)
-    )
 
-    cursor.execute(
-        """
-        DELETE FROM income_status
-        WHERE income_template_id = ?
-        """,
-        (template_id,)
-    )
+        cursor.execute(
+            """
+            DELETE FROM income_status
+            WHERE income_template_id = ?
+            """,
+            (template_id,)
+        )
 
-    cursor.execute(
-        """
-        DELETE FROM income_templates
-        WHERE id = ?
-        """,
-        (template_id,)
-    )
+        cursor.execute(
+            """
+            DELETE FROM income_templates
+            WHERE id = ?
+            """,
+            (template_id,)
+        )
 
-    conn.commit()
-    conn.close()
-    clear_data_cache()
+        conn.commit()
+        clear_data_cache()
 
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_total_income_templates(
     vault_id
 ):
 
     conn = get_connection()
+    try:
 
-    total = conn.execute(
-        """
-        SELECT
-            COALESCE(SUM(amount),0)
-        FROM income_templates
-        WHERE vault_id = ?
-        AND is_active = 1
-        """,
-        (vault_id,)
-    ).fetchone()[0]
+        total = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(amount),0)
+            FROM income_templates
+            WHERE vault_id = ?
+            AND is_active = 1
+            """,
+            (vault_id,)
+        ).fetchone()[0]
 
-    conn.close()
 
-    return total
+        return total
+
+    finally:
+        conn.close()

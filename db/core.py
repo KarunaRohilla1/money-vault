@@ -36,55 +36,57 @@ def initialize_database():
 
 def migrate_database():
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        UPDATE accounts
-        SET is_primary = 1
-        WHERE id IN (
-            SELECT MIN(id)
-            FROM accounts
-            WHERE is_active = 1
-            GROUP BY vault_id
-            HAVING SUM(is_primary) = 0
+        cursor.execute(
+            """
+            UPDATE accounts
+            SET is_primary = 1
+            WHERE id IN (
+                SELECT MIN(id)
+                FROM accounts
+                WHERE is_active = 1
+                GROUP BY vault_id
+                HAVING SUM(is_primary) = 0
+            )
+            """
         )
-        """
-    )
 
-    cursor.execute(
-        """
-        UPDATE categories
-        SET emoji = ?
-        WHERE LOWER(name) = LOWER(?)
-        AND emoji != ?
-        """,
-        (
-            DEFAULT_CATEGORY_EMOJI,
-            DEFAULT_CATEGORY_NAME,
-            DEFAULT_CATEGORY_EMOJI
+        cursor.execute(
+            """
+            UPDATE categories
+            SET emoji = ?
+            WHERE LOWER(name) = LOWER(?)
+            AND emoji != ?
+            """,
+            (
+                DEFAULT_CATEGORY_EMOJI,
+                DEFAULT_CATEGORY_NAME,
+                DEFAULT_CATEGORY_EMOJI
+            )
         )
-    )
 
-    cursor.execute("""
-    INSERT INTO wishlist_categories (vault_id, name)
-    SELECT DISTINCT vault_id, TRIM(category)
-    FROM wishlist_items
-    WHERE TRIM(COALESCE(category, '')) != ''
-    ON CONFLICT (vault_id, name) DO NOTHING
-    """)
+        cursor.execute("""
+        INSERT INTO wishlist_categories (vault_id, name)
+        SELECT DISTINCT vault_id, TRIM(category)
+        FROM wishlist_items
+        WHERE TRIM(COALESCE(category, '')) != ''
+        ON CONFLICT (vault_id, name) DO NOTHING
+        """)
 
-    ensure_default_categories_with_cursor(
-        cursor
-    )
+        ensure_default_categories_with_cursor(
+            cursor
+        )
 
-    backfill_transfer_groups_with_cursor(
-        cursor
-    )
+        backfill_transfer_groups_with_cursor(
+            cursor
+        )
 
-    conn.commit()
-    conn.close()
+        conn.commit()
 
+    finally:
+        conn.close()
 def backfill_transfer_groups_with_cursor(
     cursor
 ):
@@ -273,24 +275,26 @@ def ensure_default_category(
 ):
 
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    category_id = ensure_default_category_with_cursor(
-        cursor,
-        vault_id
-    )
+        category_id = ensure_default_category_with_cursor(
+            cursor,
+            vault_id
+        )
 
-    backfill_planning_default_category_with_cursor(
-        cursor,
-        vault_id,
-        category_id
-    )
+        backfill_planning_default_category_with_cursor(
+            cursor,
+            vault_id,
+            category_id
+        )
 
-    conn.commit()
-    conn.close()
+        conn.commit()
 
-    return category_id
+        return category_id
 
+    finally:
+        conn.close()
 def backfill_planning_default_category_with_cursor(
     cursor,
     vault_id,

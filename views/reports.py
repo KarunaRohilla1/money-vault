@@ -102,345 +102,353 @@ def period_bounds(vault_id, label):
 @cache_data(ttl=60)
 def get_planning_report_totals(vault_id, start_date, end_date):
     conn = get_connection()
+    try:
 
-    row = conn.execute(
-        """
-        WITH months AS (
-            SELECT
-                EXTRACT(MONTH FROM month_start)::int AS month,
-                EXTRACT(YEAR FROM month_start)::int AS year
-            FROM generate_series(
-                date_trunc('month', ?::date),
-                date_trunc('month', ?::date),
-                interval '1 month'
-            ) AS months(month_start)
-        ),
-        income_total AS (
-            SELECT COALESCE(SUM(
-                CASE
-                    WHEN s.status = 'CANCELLED' THEN 0
-                    ELSE COALESCE(s.actual_amount, i.amount)
-                END
-            ), 0) AS amount
-            FROM months m
-            JOIN income_templates i
-                ON i.vault_id = ?
-                AND i.is_active = 1
-            LEFT JOIN income_status s
-                ON s.income_template_id = i.id
-                AND s.month = m.month
-                AND s.year = m.year
-        ),
-        commitment_total AS (
-            SELECT COALESCE(SUM(
-                CASE
-                    WHEN s.status = 'CANCELLED' THEN 0
-                    ELSE COALESCE(s.actual_amount, c.amount)
-                END
-            ), 0) AS amount
-            FROM months m
-            JOIN commitments c
-                ON c.vault_id = ?
-                AND c.is_active = 1
-            LEFT JOIN obligation_status s
-                ON s.commitment_id = c.id
-                AND s.month = m.month
-                AND s.year = m.year
-        )
-        SELECT income_total.amount, commitment_total.amount
-        FROM income_total
-        CROSS JOIN commitment_total
-        """,
-        (
-            start_date.isoformat(),
-            end_date.isoformat(),
-            vault_id,
-            vault_id
-        )
-    ).fetchone()
-
-    conn.close()
-
-    return row[0], row[1]
+        row = conn.execute(
+            """
+            WITH months AS (
+                SELECT
+                    EXTRACT(MONTH FROM month_start)::int AS month,
+                    EXTRACT(YEAR FROM month_start)::int AS year
+                FROM generate_series(
+                    date_trunc('month', ?::date),
+                    date_trunc('month', ?::date),
+                    interval '1 month'
+                ) AS months(month_start)
+            ),
+            income_total AS (
+                SELECT COALESCE(SUM(
+                    CASE
+                        WHEN s.status = 'CANCELLED' THEN 0
+                        ELSE COALESCE(s.actual_amount, i.amount)
+                    END
+                ), 0) AS amount
+                FROM months m
+                JOIN income_templates i
+                    ON i.vault_id = ?
+                    AND i.is_active = 1
+                LEFT JOIN income_status s
+                    ON s.income_template_id = i.id
+                    AND s.month = m.month
+                    AND s.year = m.year
+            ),
+            commitment_total AS (
+                SELECT COALESCE(SUM(
+                    CASE
+                        WHEN s.status = 'CANCELLED' THEN 0
+                        ELSE COALESCE(s.actual_amount, c.amount)
+                    END
+                ), 0) AS amount
+                FROM months m
+                JOIN commitments c
+                    ON c.vault_id = ?
+                    AND c.is_active = 1
+                LEFT JOIN obligation_status s
+                    ON s.commitment_id = c.id
+                    AND s.month = m.month
+                    AND s.year = m.year
+            )
+            SELECT income_total.amount, commitment_total.amount
+            FROM income_total
+            CROSS JOIN commitment_total
+            """,
+            (
+                start_date.isoformat(),
+                end_date.isoformat(),
+                vault_id,
+                vault_id
+            )
+        ).fetchone()
 
 
+        return row[0], row[1]
+
+
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_standalone_transaction_totals(vault_id, start_date, end_date):
     conn = get_connection()
+    try:
 
-    row = conn.execute(
-        """
-        SELECT
-            COALESCE(SUM(
-                CASE
-                    WHEN transaction_type = ? THEN amount
-                    ELSE 0
-                END
-            ), 0),
-            COALESCE(SUM(
-                CASE
-                    WHEN transaction_type = ? THEN amount
-                    ELSE 0
-                END
-            ), 0)
-        FROM transactions t
-        WHERE t.vault_id = ?
-        AND t.is_deleted = 0
-        AND t.date BETWEEN ? AND ?
-        AND (
-            (
-                t.transaction_type = ?
-                AND t.id NOT IN (
-                    SELECT transaction_id
-                    FROM income_status
-                    WHERE transaction_id IS NOT NULL
+        row = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(
+                    CASE
+                        WHEN transaction_type = ? THEN amount
+                        ELSE 0
+                    END
+                ), 0),
+                COALESCE(SUM(
+                    CASE
+                        WHEN transaction_type = ? THEN amount
+                        ELSE 0
+                    END
+                ), 0)
+            FROM transactions t
+            WHERE t.vault_id = ?
+            AND t.is_deleted = 0
+            AND t.date BETWEEN ? AND ?
+            AND (
+                (
+                    t.transaction_type = ?
+                    AND t.id NOT IN (
+                        SELECT transaction_id
+                        FROM income_status
+                        WHERE transaction_id IS NOT NULL
+                    )
+                )
+                OR
+                (
+                    t.transaction_type = ?
+                    AND t.id NOT IN (
+                        SELECT transaction_id
+                        FROM obligation_status
+                        WHERE transaction_id IS NOT NULL
+                    )
                 )
             )
-            OR
+            """,
             (
-                t.transaction_type = ?
-                AND t.id NOT IN (
-                    SELECT transaction_id
-                    FROM obligation_status
-                    WHERE transaction_id IS NOT NULL
-                )
+                INCOME,
+                EXPENSE,
+                vault_id,
+                start_date.isoformat(),
+                end_date.isoformat(),
+                INCOME,
+                EXPENSE
             )
-        )
-        """,
-        (
-            INCOME,
-            EXPENSE,
-            vault_id,
-            start_date.isoformat(),
-            end_date.isoformat(),
-            INCOME,
-            EXPENSE
-        )
-    ).fetchone()
-
-    conn.close()
-
-    return row[0], row[1]
+        ).fetchone()
 
 
+        return row[0], row[1]
+
+
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_report_summary(vault_id, start_date, end_date):
     conn = get_connection()
+    try:
 
-    summary_row = conn.execute(
-        """
-        WITH transaction_count AS (
-            SELECT COUNT(*) AS count
-            FROM transactions
-            WHERE vault_id = ?
-            AND is_deleted = 0
-            AND date BETWEEN ? AND ?
-        ),
-        transfers AS (
-            SELECT COUNT(DISTINCT transfer_group_id) AS count
-            FROM transactions
-            WHERE vault_id = ?
-            AND is_deleted = 0
-            AND transfer_group_id IS NOT NULL
-            AND transaction_type = ?
-            AND date BETWEEN ? AND ?
-        ),
-        largest_expense AS (
+        summary_row = conn.execute(
+            """
+            WITH transaction_count AS (
+                SELECT COUNT(*) AS count
+                FROM transactions
+                WHERE vault_id = ?
+                AND is_deleted = 0
+                AND date BETWEEN ? AND ?
+            ),
+            transfers AS (
+                SELECT COUNT(DISTINCT transfer_group_id) AS count
+                FROM transactions
+                WHERE vault_id = ?
+                AND is_deleted = 0
+                AND transfer_group_id IS NOT NULL
+                AND transaction_type = ?
+                AND date BETWEEN ? AND ?
+            ),
+            largest_expense AS (
+                SELECT
+                    COALESCE(NULLIF(t.notes, ''), c.name, 'Expense') AS name,
+                    t.amount
+                FROM transactions t
+                LEFT JOIN categories c
+                    ON t.category_id = c.id
+                WHERE t.vault_id = ?
+                AND t.is_deleted = 0
+                AND t.transaction_type = ?
+                AND t.date BETWEEN ? AND ?
+                ORDER BY t.amount DESC
+                LIMIT 1
+            ),
+            most_used_category AS (
+                SELECT
+                    COALESCE(c.emoji || ' ' || c.name, 'Uncategorized') AS name,
+                    COUNT(*) AS count
+                FROM transactions t
+                LEFT JOIN categories c
+                    ON t.category_id = c.id
+                WHERE t.vault_id = ?
+                AND t.is_deleted = 0
+                AND t.transaction_type = ?
+                AND t.date BETWEEN ? AND ?
+                GROUP BY c.id, c.name, c.emoji
+                ORDER BY COUNT(*) DESC, COALESCE(SUM(t.amount), 0) DESC
+                LIMIT 1
+            ),
+            most_used_account AS (
+                SELECT
+                    a.name,
+                    COUNT(*) AS count
+                FROM transactions t
+                JOIN accounts a
+                    ON t.account_id = a.id
+                WHERE t.vault_id = ?
+                AND t.is_deleted = 0
+                AND t.transaction_type IN (?, ?)
+                AND t.date BETWEEN ? AND ?
+                GROUP BY a.id, a.name
+                ORDER BY COUNT(*) DESC
+                LIMIT 1
+            )
             SELECT
-                COALESCE(NULLIF(t.notes, ''), c.name, 'Expense') AS name,
-                t.amount
-            FROM transactions t
-            LEFT JOIN categories c
-                ON t.category_id = c.id
-            WHERE t.vault_id = ?
-            AND t.is_deleted = 0
-            AND t.transaction_type = ?
-            AND t.date BETWEEN ? AND ?
-            ORDER BY t.amount DESC
-            LIMIT 1
-        ),
-        most_used_category AS (
-            SELECT
-                COALESCE(c.emoji || ' ' || c.name, 'Uncategorized') AS name,
-                COUNT(*) AS count
-            FROM transactions t
-            LEFT JOIN categories c
-                ON t.category_id = c.id
-            WHERE t.vault_id = ?
-            AND t.is_deleted = 0
-            AND t.transaction_type = ?
-            AND t.date BETWEEN ? AND ?
-            GROUP BY c.id, c.name, c.emoji
-            ORDER BY COUNT(*) DESC, COALESCE(SUM(t.amount), 0) DESC
-            LIMIT 1
-        ),
-        most_used_account AS (
-            SELECT
-                a.name,
-                COUNT(*) AS count
-            FROM transactions t
-            JOIN accounts a
-                ON t.account_id = a.id
-            WHERE t.vault_id = ?
-            AND t.is_deleted = 0
-            AND t.transaction_type IN (?, ?)
-            AND t.date BETWEEN ? AND ?
-            GROUP BY a.id, a.name
-            ORDER BY COUNT(*) DESC
-            LIMIT 1
+                transaction_count.count,
+                transfers.count,
+                largest_expense.name,
+                largest_expense.amount,
+                most_used_category.name,
+                most_used_category.count,
+                most_used_account.name,
+                most_used_account.count
+            FROM transaction_count
+            CROSS JOIN transfers
+            LEFT JOIN largest_expense
+                ON TRUE
+            LEFT JOIN most_used_category
+                ON TRUE
+            LEFT JOIN most_used_account
+                ON TRUE
+            """,
+            (
+                vault_id,
+                start_date.isoformat(),
+                end_date.isoformat(),
+                vault_id,
+                TRANSFER_OUT,
+                start_date.isoformat(),
+                end_date.isoformat(),
+                vault_id,
+                EXPENSE,
+                start_date.isoformat(),
+                end_date.isoformat(),
+                vault_id,
+                EXPENSE,
+                start_date.isoformat(),
+                end_date.isoformat(),
+                vault_id,
+                INCOME,
+                EXPENSE,
+                start_date.isoformat(),
+                end_date.isoformat()
+            )
+        ).fetchone()
+
+
+        transaction_count = summary_row[0]
+        transfers = summary_row[1]
+        largest_expense = (
+            (summary_row[2], summary_row[3])
+            if summary_row[2] is not None
+            else None
         )
-        SELECT
-            transaction_count.count,
-            transfers.count,
-            largest_expense.name,
-            largest_expense.amount,
-            most_used_category.name,
-            most_used_category.count,
-            most_used_account.name,
-            most_used_account.count
-        FROM transaction_count
-        CROSS JOIN transfers
-        LEFT JOIN largest_expense
-            ON TRUE
-        LEFT JOIN most_used_category
-            ON TRUE
-        LEFT JOIN most_used_account
-            ON TRUE
-        """,
-        (
-            vault_id,
-            start_date.isoformat(),
-            end_date.isoformat(),
-            vault_id,
-            TRANSFER_OUT,
-            start_date.isoformat(),
-            end_date.isoformat(),
-            vault_id,
-            EXPENSE,
-            start_date.isoformat(),
-            end_date.isoformat(),
-            vault_id,
-            EXPENSE,
-            start_date.isoformat(),
-            end_date.isoformat(),
-            vault_id,
-            INCOME,
-            EXPENSE,
-            start_date.isoformat(),
-            end_date.isoformat()
+        most_used_category = (
+            (summary_row[4], summary_row[5])
+            if summary_row[4] is not None
+            else None
         )
-    ).fetchone()
+        most_used_account = (
+            (summary_row[6], summary_row[7])
+            if summary_row[6] is not None
+            else None
+        )
 
-    conn.close()
+        planning_income, planning_spent = get_planning_report_totals(
+            vault_id,
+            start_date,
+            end_date
+        )
+        transaction_income, transaction_spent = get_standalone_transaction_totals(
+            vault_id,
+            start_date,
+            end_date
+        )
 
-    transaction_count = summary_row[0]
-    transfers = summary_row[1]
-    largest_expense = (
-        (summary_row[2], summary_row[3])
-        if summary_row[2] is not None
-        else None
-    )
-    most_used_category = (
-        (summary_row[4], summary_row[5])
-        if summary_row[4] is not None
-        else None
-    )
-    most_used_account = (
-        (summary_row[6], summary_row[7])
-        if summary_row[6] is not None
-        else None
-    )
+        income = planning_income + transaction_income
+        spent = planning_spent + transaction_spent
+        saved = max(
+            income - spent,
+            0
+        )
 
-    planning_income, planning_spent = get_planning_report_totals(
-        vault_id,
-        start_date,
-        end_date
-    )
-    transaction_income, transaction_spent = get_standalone_transaction_totals(
-        vault_id,
-        start_date,
-        end_date
-    )
-
-    income = planning_income + transaction_income
-    spent = planning_spent + transaction_spent
-    saved = max(
-        income - spent,
-        0
-    )
-
-    return {
-        "income": income,
-        "spent": spent,
-        "saved": saved,
-        "transactions": transaction_count,
-        "transfers": transfers,
-        "largest_expense": largest_expense,
-        "most_used_category": most_used_category,
-        "most_used_account": most_used_account
-    }
+        return {
+            "income": income,
+            "spent": spent,
+            "saved": saved,
+            "transactions": transaction_count,
+            "transfers": transfers,
+            "largest_expense": largest_expense,
+            "most_used_category": most_used_category,
+            "most_used_account": most_used_account
+        }
 
 
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_category_breakdown(vault_id, start_date, end_date):
     conn = get_connection()
+    try:
 
-    rows = conn.execute(
-        """
-        SELECT
-            COALESCE(c.emoji, '•'),
-            COALESCE(c.name, 'Uncategorized'),
-            COALESCE(SUM(t.amount), 0)
-        FROM transactions t
-        LEFT JOIN categories c
-            ON t.category_id = c.id
-        WHERE t.vault_id = ?
-        AND t.is_deleted = 0
-        AND t.transaction_type = ?
-        AND t.id NOT IN (
-            SELECT transaction_id
-            FROM obligation_status
-            WHERE transaction_id IS NOT NULL
-        )
-        AND t.date BETWEEN ? AND ?
-        GROUP BY c.id, c.name, c.emoji
-        ORDER BY SUM(t.amount) DESC
-        """,
-        (
-            vault_id,
-            EXPENSE,
-            start_date.isoformat(),
-            end_date.isoformat()
-        )
-    ).fetchall()
-
-    conn.close()
-
-    _, planning_spent = get_planning_report_totals(
-        vault_id,
-        start_date,
-        end_date
-    )
-
-    report_rows = list(rows)
-
-    if planning_spent:
-        report_rows.append(
-            (
-                "calendar_month",
-                "Recurring Commitments",
-                planning_spent
+        rows = conn.execute(
+            """
+            SELECT
+                COALESCE(c.emoji, '•'),
+                COALESCE(c.name, 'Uncategorized'),
+                COALESCE(SUM(t.amount), 0)
+            FROM transactions t
+            LEFT JOIN categories c
+                ON t.category_id = c.id
+            WHERE t.vault_id = ?
+            AND t.is_deleted = 0
+            AND t.transaction_type = ?
+            AND t.id NOT IN (
+                SELECT transaction_id
+                FROM obligation_status
+                WHERE transaction_id IS NOT NULL
             )
+            AND t.date BETWEEN ? AND ?
+            GROUP BY c.id, c.name, c.emoji
+            ORDER BY SUM(t.amount) DESC
+            """,
+            (
+                vault_id,
+                EXPENSE,
+                start_date.isoformat(),
+                end_date.isoformat()
+            )
+        ).fetchall()
+
+
+        _, planning_spent = get_planning_report_totals(
+            vault_id,
+            start_date,
+            end_date
         )
 
-    report_rows.sort(
-        key=lambda row: row[2],
-        reverse=True
-    )
+        report_rows = list(rows)
 
-    return report_rows
+        if planning_spent:
+            report_rows.append(
+                (
+                    "calendar_month",
+                    "Recurring Commitments",
+                    planning_spent
+                )
+            )
+
+        report_rows.sort(
+            key=lambda row: row[2],
+            reverse=True
+        )
+
+        return report_rows
 
 
+    finally:
+        conn.close()
 @cache_data(ttl=60)
 def get_monthly_trend(vault_id, end_date):
     months = []
@@ -470,148 +478,150 @@ def get_monthly_trend(vault_id, end_date):
     )
 
     conn = get_connection()
+    try:
 
-    rows = conn.execute(
-        """
-        WITH months AS (
-            SELECT
-                month_start::date AS month_start,
-                EXTRACT(MONTH FROM month_start)::int AS month,
-                EXTRACT(YEAR FROM month_start)::int AS year
-            FROM generate_series(
-                ?::date,
-                ?::date,
-                interval '1 month'
-            ) AS months(month_start)
-        ),
-        planning_income AS (
-            SELECT
-                m.month_start,
-                COALESCE(SUM(
-                    CASE
-                        WHEN s.status = 'CANCELLED' THEN 0
-                        ELSE COALESCE(s.actual_amount, i.amount)
-                    END
-                ), 0) AS amount
-            FROM months m
-            JOIN income_templates i
-                ON i.vault_id = ?
-                AND i.is_active = 1
-            LEFT JOIN income_status s
-                ON s.income_template_id = i.id
-                AND s.month = m.month
-                AND s.year = m.year
-            GROUP BY m.month_start
-        ),
-        planning_spent AS (
-            SELECT
-                m.month_start,
-                COALESCE(SUM(
-                    CASE
-                        WHEN s.status = 'CANCELLED' THEN 0
-                        ELSE COALESCE(s.actual_amount, c.amount)
-                    END
-                ), 0) AS amount
-            FROM months m
-            JOIN commitments c
-                ON c.vault_id = ?
-                AND c.is_active = 1
-            LEFT JOIN obligation_status s
-                ON s.commitment_id = c.id
-                AND s.month = m.month
-                AND s.year = m.year
-            GROUP BY m.month_start
-        ),
-        standalone AS (
-            SELECT
-                date_trunc('month', t.date::date)::date AS month_start,
-                COALESCE(SUM(
-                    CASE
-                        WHEN t.transaction_type = ? THEN t.amount
-                        ELSE 0
-                    END
-                ), 0) AS income,
-                COALESCE(SUM(
-                    CASE
-                        WHEN t.transaction_type = ? THEN t.amount
-                        ELSE 0
-                    END
-                ), 0) AS spent
-            FROM transactions t
-            WHERE t.vault_id = ?
-            AND t.is_deleted = 0
-            AND t.date::date >= ?
-            AND t.date::date < (?::date + interval '1 month')
-            AND (
-                (
-                    t.transaction_type = ?
-                    AND t.id NOT IN (
-                        SELECT transaction_id
-                        FROM income_status
-                        WHERE transaction_id IS NOT NULL
+        rows = conn.execute(
+            """
+            WITH months AS (
+                SELECT
+                    month_start::date AS month_start,
+                    EXTRACT(MONTH FROM month_start)::int AS month,
+                    EXTRACT(YEAR FROM month_start)::int AS year
+                FROM generate_series(
+                    ?::date,
+                    ?::date,
+                    interval '1 month'
+                ) AS months(month_start)
+            ),
+            planning_income AS (
+                SELECT
+                    m.month_start,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN s.status = 'CANCELLED' THEN 0
+                            ELSE COALESCE(s.actual_amount, i.amount)
+                        END
+                    ), 0) AS amount
+                FROM months m
+                JOIN income_templates i
+                    ON i.vault_id = ?
+                    AND i.is_active = 1
+                LEFT JOIN income_status s
+                    ON s.income_template_id = i.id
+                    AND s.month = m.month
+                    AND s.year = m.year
+                GROUP BY m.month_start
+            ),
+            planning_spent AS (
+                SELECT
+                    m.month_start,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN s.status = 'CANCELLED' THEN 0
+                            ELSE COALESCE(s.actual_amount, c.amount)
+                        END
+                    ), 0) AS amount
+                FROM months m
+                JOIN commitments c
+                    ON c.vault_id = ?
+                    AND c.is_active = 1
+                LEFT JOIN obligation_status s
+                    ON s.commitment_id = c.id
+                    AND s.month = m.month
+                    AND s.year = m.year
+                GROUP BY m.month_start
+            ),
+            standalone AS (
+                SELECT
+                    date_trunc('month', t.date::date)::date AS month_start,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN t.transaction_type = ? THEN t.amount
+                            ELSE 0
+                        END
+                    ), 0) AS income,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN t.transaction_type = ? THEN t.amount
+                            ELSE 0
+                        END
+                    ), 0) AS spent
+                FROM transactions t
+                WHERE t.vault_id = ?
+                AND t.is_deleted = 0
+                AND t.date::date >= ?
+                AND t.date::date < (?::date + interval '1 month')
+                AND (
+                    (
+                        t.transaction_type = ?
+                        AND t.id NOT IN (
+                            SELECT transaction_id
+                            FROM income_status
+                            WHERE transaction_id IS NOT NULL
+                        )
+                    )
+                    OR
+                    (
+                        t.transaction_type = ?
+                        AND t.id NOT IN (
+                            SELECT transaction_id
+                            FROM obligation_status
+                            WHERE transaction_id IS NOT NULL
+                        )
                     )
                 )
-                OR
-                (
-                    t.transaction_type = ?
-                    AND t.id NOT IN (
-                        SELECT transaction_id
-                        FROM obligation_status
-                        WHERE transaction_id IS NOT NULL
-                    )
+                GROUP BY date_trunc('month', t.date::date)::date
+            )
+            SELECT
+                m.month_start,
+                COALESCE(pi.amount, 0) + COALESCE(st.income, 0) AS income,
+                COALESCE(ps.amount, 0) + COALESCE(st.spent, 0) AS spent
+            FROM months m
+            LEFT JOIN planning_income pi
+                ON pi.month_start = m.month_start
+            LEFT JOIN planning_spent ps
+                ON ps.month_start = m.month_start
+            LEFT JOIN standalone st
+                ON st.month_start = m.month_start
+            ORDER BY m.month_start
+            """,
+            (
+                start_month.isoformat(),
+                end_month.isoformat(),
+                vault_id,
+                vault_id,
+                INCOME,
+                EXPENSE,
+                vault_id,
+                start_month.isoformat(),
+                end_month.isoformat(),
+                INCOME,
+                EXPENSE
+            )
+        ).fetchall()
+
+
+        data = []
+
+        for row in rows:
+            income = row[1]
+            spent = row[2]
+
+            data.append({
+                "Month": row[0].strftime("%b"),
+                "Spending": spent,
+                "Income": income,
+                "Savings": max(
+                    income - spent,
+                    0
                 )
-            )
-            GROUP BY date_trunc('month', t.date::date)::date
-        )
-        SELECT
-            m.month_start,
-            COALESCE(pi.amount, 0) + COALESCE(st.income, 0) AS income,
-            COALESCE(ps.amount, 0) + COALESCE(st.spent, 0) AS spent
-        FROM months m
-        LEFT JOIN planning_income pi
-            ON pi.month_start = m.month_start
-        LEFT JOIN planning_spent ps
-            ON ps.month_start = m.month_start
-        LEFT JOIN standalone st
-            ON st.month_start = m.month_start
-        ORDER BY m.month_start
-        """,
-        (
-            start_month.isoformat(),
-            end_month.isoformat(),
-            vault_id,
-            vault_id,
-            INCOME,
-            EXPENSE,
-            vault_id,
-            start_month.isoformat(),
-            end_month.isoformat(),
-            INCOME,
-            EXPENSE
-        )
-    ).fetchall()
+            })
 
-    conn.close()
-
-    data = []
-
-    for row in rows:
-        income = row[1]
-        spent = row[2]
-
-        data.append({
-            "Month": row[0].strftime("%b"),
-            "Spending": spent,
-            "Income": income,
-            "Savings": max(
-                income - spent,
-                0
-            )
-        })
-
-    return data
+        return data
 
 
+    finally:
+        conn.close()
 def render_report_card(icon, title, value, caption, tone):
     st.markdown(
         f"""
