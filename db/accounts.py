@@ -361,7 +361,7 @@ def update_account(
                 type = ?,
                 opening_balance = ?,
                 is_primary = CASE
-                    WHEN ? THEN 1
+                    WHEN ? = 1 THEN 1
                     ELSE is_primary
                 END
             WHERE id = ?

@@ -55,14 +55,27 @@ TABLES = [
         [
             "id",
             "vault_id",
+            "beneficiary_vault_id",
             "account_id",
             "category_id",
             "date",
             "amount",
             "transaction_type",
+            "allocation_method",
             "notes",
             "transfer_group_id",
             "is_deleted"
+        ]
+    ),
+    (
+        "transaction_shares",
+        [
+            "id",
+            "transaction_id",
+            "participant_vault_id",
+            "share_amount",
+            "share_percentage",
+            "created_at"
         ]
     ),
     (
@@ -196,7 +209,58 @@ def fetch_sqlite_rows(connection, table_name, columns):
         """
     ).fetchall()
 
+    if table_name == "transactions":
+        rows, selected_columns = normalize_transaction_rows(
+            rows,
+            selected_columns
+        )
+
     return rows, selected_columns
+
+
+def normalize_transaction_rows(rows, selected_columns):
+    normalized_columns = list(
+        selected_columns
+    )
+
+    if "beneficiary_vault_id" not in normalized_columns:
+        normalized_columns.insert(
+            normalized_columns.index("vault_id") + 1,
+            "beneficiary_vault_id"
+        )
+
+    if "allocation_method" not in normalized_columns:
+        normalized_columns.insert(
+            normalized_columns.index("transaction_type") + 1,
+            "allocation_method"
+        )
+
+    normalized_rows = []
+
+    for row in rows:
+        row_map = dict(
+            zip(
+                selected_columns,
+                row
+            )
+        )
+        row_map.setdefault(
+            "beneficiary_vault_id",
+            row_map.get("vault_id")
+        )
+        row_map.setdefault(
+            "allocation_method",
+            None
+        )
+
+        normalized_rows.append(
+            tuple(
+                row_map.get(column)
+                for column in normalized_columns
+            )
+        )
+
+    return normalized_rows, normalized_columns
 
 
 def clear_postgres(cursor):

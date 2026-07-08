@@ -28,7 +28,10 @@ def add_account_dialog(vault_id):
 
         opening_balance = st.number_input(
             "Opening Balance",
-            step=100.0, value=None, placeholder="Enter Amount"
+            step=0.01,
+            value=None,
+            placeholder="Enter Amount",
+            format="%.2f"
         )
 
         is_primary = st.checkbox(
@@ -108,7 +111,9 @@ def edit_account_dialog(account, vault_id):
         opening_balance = st.number_input(
             "Opening Balance",
             value=float(account[3]),
-            step=100.0
+            step=0.01,
+            placeholder="Enter Amount",
+            format="%.2f"
         )
 
         is_primary = st.checkbox(
@@ -172,40 +177,40 @@ def delete_account_dialog(account_id):
     if account_has_transactions(
         account_id
     ):
-        st.error(
-            "Cannot archive an account with transactions."
+        st.warning(
+            "This account has financial history. It will be marked inactive and kept in reports and existing transactions."
         )
     else:
         st.warning(
-        "Are you sure you want to archive this account?"
-    )
+            "Are you sure you want to archive this account?"
+        )
 
-        col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
-        with col1:
+    with col1:
 
-            if st.button(
-                "Archive Account",
-                use_container_width=True
-            ):
+        if st.button(
+            "Archive Account",
+            use_container_width=True
+        ):
 
-                archive_account(
-                    account_id
-                )
+            archive_account(
+                account_id
+            )
 
-                st.success(
-                    "Account archived"
-                )
+            st.success(
+                "Account archived"
+            )
 
-                st.rerun()
+            st.rerun()
 
-        with col2:
+    with col2:
 
-            if st.button(
-                "Cancel",
-                use_container_width=True
-            ):
-                st.rerun()
+        if st.button(
+            "Cancel",
+            use_container_width=True
+        ):
+            st.rerun()
 
 def show_accounts(vault_id):
 

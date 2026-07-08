@@ -14,6 +14,7 @@ from db.transfers import (
     get_transfers,
     update_transfer
 )
+from db.financial_cycles import get_current_cycle
 
 
 INITIAL_TRANSFER_LIMIT = 5
@@ -46,7 +47,7 @@ def validate_transfer(
 
         return False
 
-    if amount <= 0:
+    if amount is None or amount <= 0:
 
         st.error(
             "Amount must be greater than zero."
@@ -135,7 +136,9 @@ def edit_transfer_dialog(
         "Amount",
         min_value=0.0,
         value=float(transfer[5]),
-        step=100.0,
+        step=0.01,
+        placeholder="Enter Amount",
+        format="%.2f",
         key=f"edit_amount_{transfer_group_id}"
     )
 
@@ -319,7 +322,10 @@ def render_transfer_form(
         amount = st.number_input(
             "Amount",
             min_value=0.0,
-            step=100.0,
+            value=None,
+            step=0.01,
+            placeholder="Enter Amount",
+            format="%.2f",
             key="transfer_amount"
         )
 
@@ -392,8 +398,10 @@ def render_transfer_table(
     if "transfer_limit" not in st.session_state:
         st.session_state.transfer_limit = INITIAL_TRANSFER_LIMIT
 
+    cycle = get_current_cycle(vault_id)
     today = date.today()
-    month_start = today.replace(day=1)
+    month_start = cycle.start_date
+    cycle_end = min(cycle.end_date, today)
 
     header_col, export_col = st.columns(
         [5, 1],
@@ -429,7 +437,7 @@ def render_transfer_table(
 
         date_to = st.date_input(
             "To Date",
-            value=today,
+            value=cycle_end,
             key="transfer_filter_to"
         )
 
@@ -652,12 +660,12 @@ def render_transfer_table(
     if len(transfers) > st.session_state.transfer_limit:
 
         if st.button(
-            "Load more",
+            "Load More",
             key="load_more_transfers",
             use_container_width=True
         ):
 
-            st.session_state.transfer_limit += 5
+            st.session_state.transfer_limit += 10
             st.rerun()
 
 

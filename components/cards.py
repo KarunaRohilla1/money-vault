@@ -5,15 +5,18 @@ def hero_card(
     title,
     value,
     subtitle="",
-    message=""
+    message="",
+    variant=""
 ):
 
     st.markdown(
-        f"""<div class="hero-card">
+        f"""<div class="hero-card {variant}">
             <div class="hero-glow"></div>
-            <div class="hero-title">{title}</div>
+            <div>
+                <div class="hero-title">{title}</div>
+                <div class="hero-message">{message}</div>
+            </div>
             <div class="hero-value">{value}</div>
-            <div class="hero-message">{message}</div>
         </div>""",unsafe_allow_html=True
     )
 
@@ -39,7 +42,7 @@ def get_spending_message(
 
     if safe_to_spend < 5000:
         return (
-            "⚠️ Tight month. "
+            "⚠️ Tight cycle. "
             "Be mindful of discretionary spending."
         )
 
@@ -49,5 +52,5 @@ def get_spending_message(
         )
 
     return (
-        "🎉 Plenty of room left this month."
+        "🎉 Plenty of room left this cycle."
     )

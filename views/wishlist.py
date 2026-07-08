@@ -254,8 +254,10 @@ def add_wishlist_dialog(vault_id):
         cost = st.number_input(
             "Cost",
             min_value=0.0,
-            step=500.0,
-            value=None
+            step=0.01,
+            value=None,
+            placeholder="Enter Amount",
+            format="%.2f"
         )
 
         image_url = st.text_input(
@@ -336,8 +338,10 @@ def edit_wishlist_dialog(item_id, vault_id):
         cost = st.number_input(
             "Cost",
             min_value=0.0,
-            step=500.0,
-            value=float(item[4])
+            step=0.01,
+            value=float(item[4]),
+            placeholder="Enter Amount",
+            format="%.2f"
         )
 
         image_url = st.text_input(

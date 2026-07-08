@@ -7,6 +7,7 @@ from db.categories import get_category_dropdown
 from db.transactions import (
     get_filtered_transactions
 )
+from db.financial_cycles import get_current_cycle
 
 from components.transaction_timeline_card import (
     transaction_timeline_card
@@ -97,6 +98,34 @@ def collapse_transfer_rows(transactions):
         collapsed.extend(group)
 
     return collapsed
+
+
+def get_transaction_display_parts(category, tx_type, notes):
+    icon = "💰"
+    category_name = category or tx_type
+
+    if tx_type in ("Transfer In", "Transfer Out", "Transfer"):
+        icon = "↔"
+        if tx_type == "Transfer In":
+            category_name = "Transfer In"
+        elif tx_type == "Transfer Out":
+            category_name = "Transfer Out"
+        else:
+            category_name = "Transfer"
+        return icon, category_name
+
+    if category:
+        parts = category.split(
+            " ",
+            1
+        )
+
+        if len(parts) == 2:
+            icon = parts[0]
+            category_name = parts[1]
+
+    return icon, category_name
+
 
 def show_transactions(vault_id):
 
@@ -203,7 +232,7 @@ def show_transactions(vault_id):
         date_range_filter = st.selectbox(
         "Date Range",
         [
-            "This Month",
+            "This Cycle",
             "Last Month",
             "Last 3 Months",
             "This Year",
@@ -270,11 +299,13 @@ def show_transactions(vault_id):
 
     month_filter = None
 
-    if date_range_filter == "This Month":
+    date_from = None
+    date_to = None
 
-        month_filter = today.strftime(
-            "%Y-%m"
-        )
+    if date_range_filter == "This Cycle":
+        cycle = get_current_cycle(vault_id)
+        date_from = cycle.start_iso
+        date_to = cycle.end_iso
 
     elif date_range_filter == "Last Month":
 
@@ -325,7 +356,9 @@ def show_transactions(vault_id):
             else account_filter
         ),
         search=search_text,
-        sort_by=sort_option
+        sort_by=sort_option,
+        date_from=date_from,
+        date_to=date_to
     )
 
     if not transactions:
@@ -450,7 +483,7 @@ def show_transactions(vault_id):
 
             st.markdown(
                 f"""
-                <div class="timeline-column">
+                <div class="timeline-column first-transaction">
                     <div class="timeline-dot"></div>
                     <div class="timeline-date-column">{display_date}</div>
                     <div class="timeline-line" style="height:{line_height}px;"></div>
@@ -468,20 +501,11 @@ def show_transactions(vault_id):
                 tx_type = tx[5]
                 notes = tx[6]
 
-                icon = "💰"
-                category_name = category
-
-                if category:
-
-                    parts = category.split(
-                        " ",
-                        1
-                    )
-
-                    if len(parts) == 2:
-
-                        icon = parts[0]
-                        category_name = parts[1]
+                icon, category_name = get_transaction_display_parts(
+                    category,
+                    tx_type,
+                    notes
+                )
 
                 transaction_timeline_card(
                     transaction_id=tx_id,

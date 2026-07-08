@@ -21,7 +21,7 @@ EXPENSE = "Expense"
 TRANSFER_IN = "Transfer In"
 TRANSFER_OUT = "Transfer Out"
 DEFAULT_CATEGORY_NAME = "Default"
-DEFAULT_CATEGORY_EMOJI = "\U0001f3f7\ufe0f"
+DEFAULT_CATEGORY_EMOJI = "🏷️"
 DEFAULT_CATEGORY_TYPE = EXPENSE
 
 def get_connection():
@@ -56,16 +56,27 @@ def migrate_database():
         cursor.execute(
             """
             UPDATE categories
-            SET emoji = ?
+            SET
+                vault_id = NULL,
+                emoji = ?,
+                category_type = ?,
+                is_system = 1,
+                is_active = 1
             WHERE LOWER(name) = LOWER(?)
-            AND emoji != ?
+            AND is_system = 1
             """,
             (
                 DEFAULT_CATEGORY_EMOJI,
+                DEFAULT_CATEGORY_TYPE,
                 DEFAULT_CATEGORY_NAME,
-                DEFAULT_CATEGORY_EMOJI
             )
         )
+
+        cursor.execute("""
+        UPDATE transactions
+        SET beneficiary_vault_id = vault_id
+        WHERE beneficiary_vault_id IS NULL
+        """)
 
         cursor.execute("""
         INSERT INTO wishlist_categories (vault_id, name)
@@ -74,6 +85,13 @@ def migrate_database():
         WHERE TRIM(COALESCE(category, '')) != ''
         ON CONFLICT (vault_id, name) DO NOTHING
         """)
+
+        cursor.execute(
+            """
+            UPDATE vaults
+            SET financial_cycle_start_day = COALESCE(financial_cycle_start_day, month_start_day, 1)
+            """
+        )
 
         ensure_default_categories_with_cursor(
             cursor
@@ -188,28 +206,28 @@ def ensure_default_category_with_cursor(
         """
         SELECT id
         FROM categories
-        WHERE vault_id = ?
+        WHERE is_system = 1
         AND LOWER(name) = LOWER(?)
         AND is_active = 1
         """,
-        (
-            vault_id,
-            DEFAULT_CATEGORY_NAME
-        )
+        (DEFAULT_CATEGORY_NAME,)
     ).fetchone()
 
     if existing:
         cursor.execute(
             """
             UPDATE categories
-            SET emoji = ?
+            SET
+                vault_id = NULL,
+                emoji = ?,
+                category_type = ?,
+                is_active = 1
             WHERE id = ?
-            AND emoji != ?
             """,
             (
                 DEFAULT_CATEGORY_EMOJI,
-                existing[0],
-                DEFAULT_CATEGORY_EMOJI
+                DEFAULT_CATEGORY_TYPE,
+                existing[0]
             )
         )
         return existing[0]
@@ -218,14 +236,11 @@ def ensure_default_category_with_cursor(
         """
         SELECT id
         FROM categories
-        WHERE vault_id = ?
+        WHERE is_system = 1
         AND LOWER(name) = LOWER(?)
         AND is_active = 0
         """,
-        (
-            vault_id,
-            DEFAULT_CATEGORY_NAME
-        )
+        (DEFAULT_CATEGORY_NAME,)
     ).fetchone()
 
     if archived:
@@ -234,8 +249,10 @@ def ensure_default_category_with_cursor(
             """
             UPDATE categories
             SET
+                vault_id = NULL,
                 emoji = ?,
                 category_type = ?,
+                is_system = 1,
                 is_active = 1
             WHERE id = ?
             """,
@@ -256,12 +273,12 @@ def ensure_default_category_with_cursor(
             name,
             emoji,
             category_type,
+            is_system,
             is_active
         )
-        VALUES (?, ?, ?, ?, 1)
+        VALUES (NULL, ?, ?, ?, 1, 1)
         """,
         (
-            vault_id,
             DEFAULT_CATEGORY_NAME,
             DEFAULT_CATEGORY_EMOJI,
             DEFAULT_CATEGORY_TYPE
@@ -363,6 +380,7 @@ def upsert_linked_transaction(
                 UPDATE transactions
                 SET
                     vault_id = ?,
+                    beneficiary_vault_id = ?,
                     account_id = ?,
                     category_id = ?,
                     date = ?,
@@ -373,6 +391,7 @@ def upsert_linked_transaction(
                 WHERE id = ?
                 """,
                 (
+                    vault_id,
                     vault_id,
                     account_id,
                     category_id,
@@ -391,6 +410,7 @@ def upsert_linked_transaction(
         INSERT INTO transactions
         (
             vault_id,
+            beneficiary_vault_id,
             account_id,
             category_id,
             date,
@@ -399,9 +419,10 @@ def upsert_linked_transaction(
             notes,
             is_deleted
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
         """,
         (
+            vault_id,
             vault_id,
             account_id,
             category_id,

@@ -1,7 +1,5 @@
 import streamlit as st
-from datetime import datetime
 from datetime import date
-import calendar
 from components.planning.icons import (
     get_commitment_icon,
     get_income_icon
@@ -22,20 +20,25 @@ from db.accounts import get_accounts
 from db.planning import (
     add_commitment,
     add_income_template,
-    create_cycle,
     delete_commitment,
     delete_income_template,
     finalize_month,
     get_commitments,
     get_cycle,
+    get_cycle_planning_summary,
     get_income_templates,
-    get_monthly_planning_totals,
-    get_next_month,
     get_planning_activity_statuses,
     save_income_status,
     save_obligation_status,
     update_commitment,
     update_income_template
+)
+from db.financial_cycles import (
+    build_cycle_navigation_options,
+    close_active_cycle,
+    derive_cycle_status,
+    format_cycle_range,
+    get_cycle_for_date,
 )
 
 def get_day_suffix(day):
@@ -49,6 +52,7 @@ def get_day_suffix(day):
         3: "rd"
     }.get(day % 10, "th")
 
+
 def show_planning(vault_id):
 
     income_templates = get_income_templates(
@@ -61,209 +65,264 @@ def show_planning(vault_id):
     [3.8,2.2],
     vertical_alignment="center"
 )
-    current_year = datetime.now().year
-    months = []
+    current_cycle = get_cycle_for_date(
+        vault_id,
+        date.today().isoformat()
+    )
+    cycle_options = build_cycle_navigation_options(vault_id)
 
-    current_year = datetime.now().year
+    if "planning_selected_cycle_start" not in st.session_state:
+        st.session_state.planning_selected_cycle_start = (
+            current_cycle.start_iso
+        )
 
-    for year in range(
-        current_year - 1,
-        current_year + 2
-    ):
+    cycle_keys = [
+        option["key"]
+        for option in cycle_options
+    ]
 
-        for month in range(1, 13):
+    if st.session_state.planning_selected_cycle_start not in cycle_keys:
+        st.session_state.planning_selected_cycle_start = (
+            current_cycle.start_iso
+        )
 
-            months.append(
-
-                datetime(
-                    year,
-                    month,
-                    1
-                ).strftime("%B %Y")
-
-            )
-
-    current_month = datetime.now().strftime("%B %Y")
-
-    if current_month in months:
-        default_index = months.index(current_month)
-    else:
-        default_index = 0
-
-    if "month_selector" not in st.session_state:
-        st.session_state.month_selector = months[default_index]
+    selected_index = cycle_keys.index(
+        st.session_state.planning_selected_cycle_start
+    )
 
     with title_col:
 
         st.markdown("""
         <div class="planning-header">
-            <h2>📅 Monthly Cycle</h2>
-            <p>Plan, execute and close your month.</p>
+            <h2>📅 Financial Cycle</h2>
+            <p>Plan, execute and close your financial period.</p>
         </div>
         """, unsafe_allow_html=True)
-
     with nav_col:
-        current_index = months.index(
-            st.session_state.month_selector
-        )
-
         nav_left, nav_mid, nav_right = st.columns(
-            [0.9, 3.2, 0.9],
+            [1.1, 2.3, 1.1],
             gap="small",
             vertical_alignment="center"
         )
 
         with nav_left:
-
             if st.button(
-                "❮",
-                key="month_prev",
+                "Previous Cycle",
+                key="cycle_prev",
                 use_container_width=True,
-                disabled=current_index == 0
+                disabled=selected_index == 0
             ):
-
-                st.session_state.month_selector = months[
-                    current_index - 1
-                ]
+                st.session_state.planning_selected_cycle_start = (
+                    cycle_options[selected_index - 1]["key"]
+                )
+                st.rerun()
 
         with nav_mid:
-
-            st.markdown(
-                f"""
-                <div class="glass-month">
-                    {st.session_state.month_selector}
-                </div>
-                """,
-                unsafe_allow_html=True
+            selected_cycle_key = st.selectbox(
+                "Current Cycle",
+                options=cycle_keys,
+                index=selected_index,
+                format_func=lambda key: next(
+                    option["label"]
+                    for option in cycle_options
+                    if option["key"] == key
+                ),
+                label_visibility="collapsed"
             )
+            if selected_cycle_key != (
+                st.session_state.planning_selected_cycle_start
+            ):
+                st.session_state.planning_selected_cycle_start = (
+                    selected_cycle_key
+                )
+                st.rerun()
 
         with nav_right:
-
             if st.button(
-                "❯",
-                key="month_next",
+                "Next Cycle",
+                key="cycle_next",
                 use_container_width=True,
-                disabled=current_index == len(months)-1
+                disabled=selected_index == len(cycle_options) - 1
             ):
+                st.session_state.planning_selected_cycle_start = (
+                    cycle_options[selected_index + 1]["key"]
+                )
+                st.rerun()
 
-                st.session_state.month_selector = months[
-                    current_index + 1
-                ]
+        selected_context = get_cycle_for_date(
+            vault_id,
+            st.session_state.planning_selected_cycle_start
+        )
+        selected_cycle_label = format_cycle_range(
+            selected_context.start_date,
+            selected_context.end_date
+        )
 
-    selected_month = st.session_state.month_selector
+        st.markdown(
+            f"""
+            <div class="glass-month">
+                {selected_cycle_label}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-    selected_date = datetime.strptime(
-        selected_month,
-        "%B %Y"
-    )
-        
-    if st.session_state.get("last_close_dialog_month") != selected_month:
+    selected_date = selected_context.start_date
+    selected_cycle_key = selected_context.start_iso
+
+    if st.session_state.get("last_close_dialog_cycle") != selected_cycle_key:
 
         for key in list(st.session_state.keys()):
 
             if key.startswith("close_"):
                 del st.session_state[key]
 
-        st.session_state.last_close_dialog_month = selected_month
+        st.session_state.last_close_dialog_cycle = selected_cycle_key
 
-    create_cycle(
-    vault_id,
-    selected_date.month,
-    selected_date.year)
-
-    monthly_totals = get_monthly_planning_totals(
-        vault_id,
-        selected_date.month,
-        selected_date.year
-    )
-    activity_statuses = get_planning_activity_statuses(
-        vault_id,
-        selected_date.month,
-        selected_date.year
-    )
-
-    income = monthly_totals["income"]
-    total_commitments = monthly_totals[
-        "planned_commitments"
-    ]
-    remaining_commitments = monthly_totals[
-        "remaining_commitments"
-    ]
-
-    selected_month_date  = selected_date.date()
-
-    days_in_month = calendar.monthrange(
-        selected_month_date.year,
-        selected_month_date.month
-    )[1]
-
-    current_date = date.today()
-
-    if (
-        selected_date.year == current_date.year
-        and
-        selected_date.month == current_date.month
-    ):
-        days_left = (
-            days_in_month
-            - current_date.day
-        )
-    else:
-        days_left = days_in_month
-
-    month_start = selected_month_date.replace(day=1)
-
-    started_on = month_start.strftime("%d %b %Y")
     cycle = get_cycle(
         vault_id,
         selected_date.month,
         selected_date.year
     )
+    cycle_month = cycle[2]
+    cycle_year = cycle[3]
+    cycle_start = date.fromisoformat(cycle[5])
+    cycle_end = date.fromisoformat(cycle[6])
+    cycle_label = format_cycle_range(
+        cycle_start,
+        cycle_end,
+        include_year=True
+    )
 
-    cycle_status = cycle[4]
-    is_read_only = cycle_status in ["PLANNED", "CLOSED"]
-    if cycle_status == "ACTIVE":
-        pill = "🟢 Active"
+    cycle_summary = get_cycle_planning_summary(
+        vault_id,
+        cycle_month,
+        cycle_year,
+        cycle_start.isoformat(),
+        cycle_end.isoformat()
+    )
+    activity_statuses = get_planning_activity_statuses(
+        vault_id,
+        cycle_month,
+        cycle_year
+    )
 
-    elif cycle_status == "PLANNED":
-        pill = "🟣 Planned"
+    income = cycle_summary["income_planned"]
+    total_commitments = cycle_summary["commitments_planned"]
+    remaining_commitments = cycle_summary["remaining_commitments"]
 
-    elif cycle_status == "CLOSED":
-        pill = "🔒 Closed"
+    current_date = date.today()
 
+    total_days = max((cycle_end - cycle_start).days + 1, 1)
+    if cycle_start <= current_date <= cycle_end:
+        days_left = max((cycle_end - current_date).days + 1, 0)
+        days_completed = min(
+            max((current_date - cycle_start).days, 0),
+            total_days
+        )
+    elif current_date > cycle_end:
+        days_left = 0
+        days_completed = total_days
     else:
-        pill = "⚪ Unknown"
+        days_left = total_days
+        days_completed = 0
+
+    progress_percent = int(
+        days_completed / total_days * 100
+    )
+
+    started_on = cycle_start.strftime("%d %b %Y")
+
+    cycle_status = derive_cycle_status(
+        cycle_start,
+        cycle_end,
+        current_date
+    )
+    is_read_only = False
+    pill = cycle_status
+
+    upcoming_commitments = 0
+    for commitment in commitments:
+        status_row = activity_statuses.get(
+            ("commitment", commitment[0])
+        )
+        if not status_row or status_row[1] in [
+            "PENDING",
+            "CARRIED_FORWARD"
+        ]:
+            upcoming_commitments += 1
+
+    hero_metrics = [
+        (
+            "Income Planned",
+            f"&#8377;{cycle_summary['income_planned']:,.0f}",
+            "success"
+        ),
+        (
+            "Income Received",
+            f"&#8377;{cycle_summary['income_received']:,.0f}",
+            "success"
+        ),
+        (
+            "Remaining Commitments",
+            f"&#8377;{cycle_summary['remaining_commitments']:,.0f}",
+            "danger"
+        ),
+        (
+            "Projected Savings",
+            f"&#8377;{cycle_summary['projected_savings']:,.0f}",
+            "accent"
+        )
+    ]
+
+    hero_metric_html = "".join(
+        f"""<div class="cycle-hero-metric">
+                <span>{label}</span>
+                <strong class="{tone}">{value}</strong>
+            </div>"""
+        for label, value, tone in hero_metrics
+    )
 
     st.markdown(
     f"""<div class="cycle-hero">
-        <div class="cycle-status">
-            <div class="status-row">
-                <div class="cycle-label">Status</div>
+        <div class="cycle-hero-main">
+            <div class="cycle-hero-title-row">
+                <div>
+                    <div class="cycle-eyebrow">Financial Cycle</div>
+                    <div class="cycle-title">{cycle_label}</div>
+                </div>
                 <div class="status-pill">{pill}</div>
             </div>
-            <div class="cycle-meta">
-                <span class="cycle-label">Started</span>
-                <span class="cycle-meta-value">{started_on}</span>
+            <div class="cycle-progress-track">
+                <div style="width:{progress_percent}%"></div>
             </div>
-            <div class="cycle-meta">
-                <span class="cycle-label">Left</span>
-                <span class="cycle-meta-value success">{days_left} days</span>
+            <div class="cycle-hero-facts">
+                <div>
+                    <span>Started</span>
+                    <strong>{started_on}</strong>
+                </div>
+                <div>
+                    <span>Completed</span>
+                    <strong>{days_completed}/{total_days} days</strong>
+                </div>
+                <div>
+                    <span>Remaining</span>
+                    <strong class="success">{days_left} days</strong>
+                </div>
+                <div>
+                    <span>Progress</span>
+                    <strong>{progress_percent}%</strong>
+                </div>
             </div>
         </div>
-        <div class="cycle-divider"></div>
-        <div class="cycle-metric">
-            <div class="cycle-label">Income</div>
-            <div class="income-value">₹{income:,.0f}</div>
-        </div>
-        <div class="cycle-divider"></div>
-        <div class="cycle-metric">
-            <div class="cycle-label">Planned Commitments</div>
-            <div class="reserved-value">₹{total_commitments:,.0f}</div>
-        </div>
-        <div class="cycle-divider"></div>
-        <div class="cycle-metric">
-            <div class="cycle-label">Remaining Commitments</div>
-            <div class="pool-value">₹{remaining_commitments:,.0f}</div>
+        <div class="cycle-hero-side">
+            <div class="cycle-hero-metrics">
+                {hero_metric_html}
+            </div>
+            <div class="cycle-hero-upcoming">
+                <span>Upcoming Commitments</span>
+                <strong>{upcoming_commitments}</strong>
+            </div>
         </div>
     </div>
     """,
@@ -272,13 +331,54 @@ def show_planning(vault_id):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    if cycle_status == "PLANNED":
-        st.warning(f"""**{selected_month}** hasn't started yet. This is a preview of your upcoming month. Editing will be enabled once the cycle becomes active.""")
-    elif cycle_status == "CLOSED":
-        st.warning(f"""**{selected_month}** has been successfully closed. This cycle is now locked and can no longer be edited.""")
+    if pill == "Completed":
+        st.warning(f"""**{cycle_label}** is completed.""")
+
+    st.markdown(
+        """
+        <div class="section-main-title">Planning Summary</div>
+        <div class="section-subtitle">
+            Selected financial cycle snapshot.
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    metric_values = [
+        ("Income Planned", cycle_summary["income_planned"]),
+        ("Income Received", cycle_summary["income_received"]),
+        ("Commitments Planned", cycle_summary["commitments_planned"]),
+        ("Commitments Completed", cycle_summary["commitments_completed"]),
+        ("Remaining Commitments", cycle_summary["remaining_commitments"]),
+        ("Savings Goal", cycle_summary["savings_goal"]),
+        ("Projected Savings", cycle_summary["projected_savings"])
+    ]
+
+    for row_start in range(0, len(metric_values), 4):
+        columns = st.columns(4)
+        for column, (label, amount) in zip(
+            columns,
+            metric_values[row_start:row_start + 4]
+        ):
+            with column:
+                st.metric(
+                    label,
+                    f"₹{amount:,.0f}"
+                )
+
+    empty_messages = []
+    if cycle_summary["income_planned"] <= 0:
+        empty_messages.append("No income planned for this cycle.")
+    if cycle_summary["commitments_planned"] <= 0:
+        empty_messages.append("No commitments added.")
+    if cycle_summary["expenses"] <= 0:
+        empty_messages.append("No transactions yet.")
+
+    if empty_messages:
+        st.info(" ".join(empty_messages))
     
     ##########################################################################
-    # MONTHLY ACTIVITIES
+    # FINANCIAL CYCLE ACTIVITIES
     ##########################################################################
 
     with st.container(border=True):
@@ -289,7 +389,7 @@ def show_planning(vault_id):
 
             st.markdown(f"""
             <div class="section-main-title">
-                Monthly Activities ({selected_month})
+                Financial Cycle Activities ({cycle_label})
             </div>
 
             <div class="section-subtitle">
@@ -348,7 +448,7 @@ def show_planning(vault_id):
             key=lambda x: x["due_day"]
         )
 
-        month_name = selected_date.strftime("%b")
+        month_name = cycle_start.strftime("%b")
 
         for activity in activities:
 
@@ -398,8 +498,8 @@ def show_planning(vault_id):
                     complete_callback=lambda amount, i=activity["id"]:
                         save_income_status(
                             i,
-                            selected_date.month,
-                            selected_date.year,
+                            cycle_month,
+                            cycle_year,
                             amount,
                             "RECEIVED"
                         ),
@@ -407,8 +507,8 @@ def show_planning(vault_id):
                     cancel_callback=lambda i=activity["id"]:
                         save_income_status(
                             i,
-                            selected_date.month,
-                            selected_date.year,
+                            cycle_month,
+                            cycle_year,
                             0,
                             "CANCELLED"
                         ),
@@ -459,8 +559,8 @@ def show_planning(vault_id):
                     complete_callback=lambda amount, i=activity["id"]:
                         save_obligation_status(
                             i,
-                            selected_date.month,
-                            selected_date.year,
+                            cycle_month,
+                            cycle_year,
                             amount,
                             "PAID"
                         ),
@@ -468,8 +568,8 @@ def show_planning(vault_id):
                     cancel_callback=lambda i=activity["id"]:
                         save_obligation_status(
                             i,
-                            selected_date.month,
-                            selected_date.year,
+                            cycle_month,
+                            cycle_year,
                             0,
                             "CANCELLED"
                         ),
@@ -493,7 +593,7 @@ def show_planning(vault_id):
             </div>
 
             <div class="section-subtitle">
-                Expected income sources every month.
+                Expected income sources for each financial cycle.
             </div>
             """, unsafe_allow_html=True)
 
@@ -537,8 +637,10 @@ def show_planning(vault_id):
                 amount = st.number_input(
                     "Amount",
                     min_value=0.0,
-                    step=100.0,
-                    value=None
+                    step=0.01,
+                    value=None,
+                    placeholder="Enter Amount",
+                    format="%.2f"
                 )
 
                 due_day = st.number_input(
@@ -553,19 +655,27 @@ def show_planning(vault_id):
                     list(account_map.keys())
                 )
 
-                if st.button(
-                    "Cancel",
-                    use_container_width=True
-                ):
+                save_col, cancel_col = st.columns(2)
+
+                with save_col:
+                    save_clicked = st.button(
+                        "💾 Save",
+                        use_container_width=True
+                    )
+
+                with cancel_col:
+                    cancel_clicked = st.button(
+                        "Cancel",
+                        use_container_width=True
+                    )
+
+                if cancel_clicked:
 
                     st.session_state.show_income_form = False
 
                     st.rerun()
 
-                if st.button(
-                    "💾 Save",
-                    use_container_width=True
-                ):
+                if save_clicked:
 
                     if not name.strip():
 
@@ -591,13 +701,17 @@ def show_planning(vault_id):
 
                         st.stop()
 
-                    add_income_template(
-                        vault_id,
-                        name.strip(),
-                        amount,
-                        due_day,
-                        account_map[selected_account]
-                    )
+                    try:
+                        add_income_template(
+                            vault_id,
+                            name.strip(),
+                            amount,
+                            due_day,
+                            account_map[selected_account]
+                        )
+                    except ValueError as error:
+                        st.error(str(error))
+                        st.stop()
 
                     st.session_state.show_income_form = False
 
@@ -674,7 +788,7 @@ def show_planning(vault_id):
             </div>
 
             <div class="section-subtitle">
-                These create obligations every month.
+                These create obligations for each financial cycle.
             </div>
             """, unsafe_allow_html=True)
 
@@ -718,7 +832,10 @@ def show_planning(vault_id):
                     amount = st.number_input(
                         "Amount",
                         min_value=0.0,
-                        step=100.0, value=None
+                        step=0.01,
+                        value=None,
+                        placeholder="Enter Amount",
+                        format="%.2f"
                     )
 
                     due_day = st.number_input(
@@ -762,13 +879,17 @@ def show_planning(vault_id):
                                 )
                                 st.stop()
 
-                            add_commitment(
-                                vault_id,
-                                name.strip(),
-                                amount,
-                                due_day,
-                                account_map[selected_account]
-                            )
+                            try:
+                                add_commitment(
+                                    vault_id,
+                                    name.strip(),
+                                    amount,
+                                    due_day,
+                                    account_map[selected_account]
+                                )
+                            except ValueError as error:
+                                error_placeholder.error(str(error))
+                                st.stop()
 
                             st.session_state.show_template_form = False
 
@@ -849,13 +970,15 @@ def show_planning(vault_id):
                 )
 
     ##########################################################################
-    # CLOSE MONTH
+    # CLOSE CYCLE
     ##########################################################################
 
-    close_disabled = cycle_status != "ACTIVE"
+    close_disabled = (
+        cycle_status != "Current"
+    )
 
     if st.button(
-        "🔒 Close Month",
+        "Close Cycle",
         use_container_width=True,
         disabled=close_disabled
     ):
@@ -916,31 +1039,27 @@ def show_planning(vault_id):
                         "default_action": None
                     })
 
-        def handle_close_month(items):
+        def handle_close_cycle(items):
 
             finalize_month(
                 vault_id,
-                selected_date.month,
-                selected_date.year,
+                cycle_month,
+                cycle_year,
                 items
             )
-            next_month, next_year = get_next_month(
-                selected_date.month,
-                selected_date.year
+            close_active_cycle(vault_id)
+            current_cycle = get_cycle_for_date(
+                vault_id,
+                date.today().isoformat()
             )
-
-            st.session_state.month_selector = datetime(
-                next_year,
-                next_month,
-                1
-            ).strftime("%B %Y")
-
-            st.success("Month closed successfully!")
-            st.session_state.closing_month = False
+            st.session_state.planning_selected_cycle_start = (
+                current_cycle.start_iso
+            )
+            st.success("Cycle closed successfully!")
             st.rerun()
 
         show_close_month_dialog(
-            month_name=selected_month,
+            month_name=cycle_label,
             pending_items=pending,
-            on_confirm=handle_close_month
+            on_confirm=handle_close_cycle
         )

@@ -6,6 +6,14 @@ from db.core import (
 from db.cache import cache_data, clear_data_cache
 
 
+def validate_pin(pin):
+    if pin is None:
+        return
+
+    if len(pin) < 4 or len(pin) > 6:
+        raise ValueError("PIN must be between 4 and 6 characters.")
+
+
 @cache_data(ttl=60)
 def vault_exists():
 
@@ -78,6 +86,8 @@ def create_vault(
     shared_vault_ids=None
 ):
 
+    validate_pin(pin)
+
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -89,15 +99,19 @@ def create_vault(
                 name,
                 pin_hash,
                 month_start_day,
+                financial_cycle_start_day,
+                monthly_savings_goal,
                 vault_type,
                 is_admin
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name,
                 hash_pin(pin),
                 1,
+                1,
+                0,
                 vault_type,
                 int(is_admin)
             )
@@ -128,6 +142,7 @@ def update_vault(
     pin=None,
     is_admin=None,
     month_start_day=None,
+    monthly_savings_goal=None,
     vault_type=None,
     shared_vault_ids=None
 ):
@@ -164,6 +179,7 @@ def update_vault(
         ]
 
         if pin:
+            validate_pin(pin)
             updates.append(
                 "pin_hash = ?"
             )
@@ -180,11 +196,31 @@ def update_vault(
             )
 
         if month_start_day is not None:
+            month_start_day = int(month_start_day)
+            if month_start_day < 1 or month_start_day > 28:
+                raise ValueError("Financial cycle start day must be between 1 and 28.")
             updates.append(
                 "month_start_day = ?"
             )
             params.append(
-                int(month_start_day)
+                month_start_day
+            )
+            updates.append(
+                "financial_cycle_start_day = ?"
+            )
+            params.append(
+                month_start_day
+            )
+
+        if monthly_savings_goal is not None:
+            monthly_savings_goal = float(monthly_savings_goal)
+            if monthly_savings_goal < 0:
+                raise ValueError("Monthly savings goal cannot be negative.")
+            updates.append(
+                "monthly_savings_goal = ?"
+            )
+            params.append(
+                monthly_savings_goal
             )
 
         if vault_type is not None:
@@ -274,6 +310,58 @@ def get_vault_share_ids(vault_id):
     finally:
         conn.close()
 @cache_data(ttl=60)
+def get_connected_shared_vaults(vault_id):
+
+    conn = get_connection()
+    try:
+
+        vaults = conn.execute(
+            """
+            SELECT
+                shared.id,
+                shared.name
+            FROM vault_shares vs
+            JOIN vaults shared
+                ON vs.vault_id = shared.id
+            WHERE vs.shared_vault_id = ?
+            AND shared.vault_type = 'Shared'
+            ORDER BY shared.name
+            """,
+            (vault_id,)
+        ).fetchall()
+
+
+        return vaults
+
+    finally:
+        conn.close()
+@cache_data(ttl=60)
+def get_shared_vault_participants(shared_vault_id):
+
+    conn = get_connection()
+    try:
+
+        participants = conn.execute(
+            """
+            SELECT
+                participant.id,
+                participant.name
+            FROM vault_shares vs
+            JOIN vaults participant
+                ON vs.shared_vault_id = participant.id
+            WHERE vs.vault_id = ?
+            AND participant.vault_type = 'Individual'
+            ORDER BY participant.name
+            """,
+            (shared_vault_id,)
+        ).fetchall()
+
+
+        return participants
+
+    finally:
+        conn.close()
+@cache_data(ttl=60)
 def get_vault_by_id(vault_id):
 
     conn = get_connection()
@@ -285,7 +373,7 @@ def get_vault_by_id(vault_id):
                 id,
                 name,
                 is_admin,
-                month_start_day,
+                COALESCE(financial_cycle_start_day, month_start_day, 1),
                 vault_type
             FROM vaults
             WHERE id = ?
@@ -299,6 +387,27 @@ def get_vault_by_id(vault_id):
     finally:
         conn.close()
 @cache_data(ttl=60)
+def get_vault_financial_settings(vault_id):
+
+    conn = get_connection()
+    try:
+
+        return conn.execute(
+            """
+            SELECT
+                COALESCE(financial_cycle_start_day, month_start_day, 1),
+                COALESCE(monthly_savings_goal, 0)
+            FROM vaults
+            WHERE id = ?
+            """,
+            (vault_id,)
+        ).fetchone()
+
+    finally:
+        conn.close()
+
+
+@cache_data(ttl=60)
 def get_all_vaults():
 
     conn = get_connection()
@@ -310,7 +419,7 @@ def get_all_vaults():
                 id,
                 name,
                 is_admin,
-                month_start_day,
+                COALESCE(financial_cycle_start_day, month_start_day, 1),
                 vault_type
             FROM vaults
             ORDER BY name
@@ -387,7 +496,6 @@ def get_admin_count():
     finally:
         conn.close()
 def delete_vault(vault_id):
-
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -418,10 +526,32 @@ def delete_vault(vault_id):
 
         cursor.execute(
             """
+            DELETE FROM transaction_shares
+            WHERE participant_vault_id = ?
+            OR transaction_id IN (
+                SELECT id
+                FROM transactions
+                WHERE vault_id = ?
+                OR beneficiary_vault_id = ?
+            )
+            """,
+            (
+                vault_id,
+                vault_id,
+                vault_id
+            )
+        )
+
+        cursor.execute(
+            """
             DELETE FROM transactions
             WHERE vault_id = ?
+            OR beneficiary_vault_id = ?
             """,
-            (vault_id,)
+            (
+                vault_id,
+                vault_id
+            )
         )
 
         cursor.execute(
@@ -438,6 +568,84 @@ def delete_vault(vault_id):
             WHERE vault_id = ?
             """,
             (vault_id,)
+        )
+
+        cursor.execute(
+            """
+            DELETE FROM shared_bill_instance_shares
+            WHERE participant_vault_id = ?
+            OR bill_instance_id IN (
+                SELECT i.id
+                FROM shared_bill_instances i
+                LEFT JOIN shared_bill_cycles c
+                    ON c.id = i.cycle_id
+                LEFT JOIN shared_bills b
+                    ON b.id = i.bill_id
+                WHERE c.shared_vault_id = ?
+                OR b.shared_vault_id = ?
+                OR b.category_id IN (
+                    SELECT id
+                    FROM categories
+                    WHERE vault_id = ?
+                )
+            )
+            """,
+            (
+                vault_id,
+                vault_id,
+                vault_id,
+                vault_id
+            )
+        )
+
+        cursor.execute(
+            """
+            DELETE FROM shared_bill_instances
+            WHERE cycle_id IN (
+                SELECT id
+                FROM shared_bill_cycles
+                WHERE shared_vault_id = ?
+            )
+            OR bill_id IN (
+                SELECT id
+                FROM shared_bills
+                WHERE shared_vault_id = ?
+                OR category_id IN (
+                    SELECT id
+                    FROM categories
+                    WHERE vault_id = ?
+                )
+            )
+            """,
+            (
+                vault_id,
+                vault_id,
+                vault_id
+            )
+        )
+
+        cursor.execute(
+            """
+            DELETE FROM shared_bill_cycles
+            WHERE shared_vault_id = ?
+            """,
+            (vault_id,)
+        )
+
+        cursor.execute(
+            """
+            DELETE FROM shared_bills
+            WHERE shared_vault_id = ?
+            OR category_id IN (
+                SELECT id
+                FROM categories
+                WHERE vault_id = ?
+            )
+            """,
+            (
+                vault_id,
+                vault_id
+            )
         )
 
         cursor.execute(

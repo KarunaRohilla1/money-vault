@@ -28,7 +28,10 @@ def add_category(
             """
             SELECT id
             FROM categories
-            WHERE vault_id = ?
+            WHERE (
+                vault_id = ?
+                OR is_system = 1
+            )
             AND LOWER(name) = LOWER(?)
             AND is_active = 1
             """,
@@ -92,11 +95,16 @@ def get_categories(vault_id):
                 id,
                 emoji,
                 name,
-                category_type
+                category_type,
+                parent_category,
+                is_system
             FROM categories
-            WHERE vault_id = ?
+            WHERE (
+                vault_id = ?
+                OR is_system = 1
+            )
             AND is_active = 1
-            ORDER BY name
+            ORDER BY is_system DESC, COALESCE(parent_category, 'Custom'), name
             """,
             (vault_id,)
         ).fetchall()
@@ -161,21 +169,18 @@ def delete_category(category_id):
 
         category = conn.execute(
             """
-            SELECT name
+            SELECT name, is_system
             FROM categories
             WHERE id = ?
             """,
             (category_id,)
         ).fetchone()
 
-        if (
-            category
-            and category[0].lower()
-            == DEFAULT_CATEGORY_NAME.lower()
-        ):
+        if category and category[1]:
+            raise ValueError("System categories cannot be deleted.")
 
-
-            return
+        if category and category[0].lower() == DEFAULT_CATEGORY_NAME.lower():
+            raise ValueError("Default category cannot be deleted.")
 
         conn.execute(
             """
@@ -201,20 +206,52 @@ def get_category_dropdown(vault_id):
     conn = get_connection()
     try:
 
-        categories = conn.execute(
+        vault = conn.execute(
+            """
+            SELECT vault_type
+            FROM vaults
+            WHERE id = ?
+            """,
+            (vault_id,)
+        ).fetchone()
+        shared_only = bool(vault and vault[0] == "Shared")
+
+        if shared_only:
+            categories = conn.execute(
+                """
+                SELECT
+                    id,
+                    emoji,
+                    name,
+                    category_type,
+                    parent_category,
+                    is_system
+                FROM categories
+                WHERE is_system = 1
+                AND is_active = 1
+                ORDER BY COALESCE(parent_category, 'Miscellaneous'), name
+                """
+            ).fetchall()
+        else:
+            categories = conn.execute(
             """
             SELECT
                 id,
                 emoji,
                 name,
-                category_type
+                category_type,
+                parent_category,
+                is_system
             FROM categories
-            WHERE vault_id = ?
+            WHERE (
+                vault_id = ?
+                OR is_system = 1
+            )
             AND is_active = 1
-            ORDER BY name
+            ORDER BY is_system DESC, COALESCE(parent_category, 'Custom'), name
             """,
             (vault_id,)
-        ).fetchall()
+            ).fetchall()
 
 
         return categories
@@ -240,14 +277,29 @@ def update_category(
                 "Category name cannot be empty."
             )
 
+        category = conn.execute(
+            """
+            SELECT is_system
+            FROM categories
+            WHERE id = ?
+            """,
+            (category_id,)
+        ).fetchone()
+
+        if category and category[0]:
+            raise ValueError("System categories cannot be edited.")
+
         existing = conn.execute(
             """
             SELECT id
             FROM categories
-            WHERE vault_id = (
-                SELECT vault_id
-                FROM categories
-                WHERE id = ?
+            WHERE (
+                vault_id = (
+                    SELECT vault_id
+                    FROM categories
+                    WHERE id = ?
+                )
+                OR is_system = 1
             )
             AND LOWER(name) = LOWER(?)
             AND id != ?

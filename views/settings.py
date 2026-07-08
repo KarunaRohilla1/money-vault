@@ -8,6 +8,7 @@ from db.vaults import (
     get_admin_count,
     get_all_vaults,
     get_vault_by_id,
+    get_vault_financial_settings,
     get_vault_share_ids,
     promote_to_admin,
     update_vault
@@ -23,6 +24,7 @@ def vault_share_options(vaults, current_vault_id):
         vault[1]: vault[0]
         for vault in vaults
         if vault[0] != current_vault_id
+        and vault[4] == "Individual"
     }
 
 
@@ -40,7 +42,7 @@ def create_vault_dialog():
 @st.dialog("Edit Vault")
 def edit_vault_dialog(vault):
     vault_id, name, is_admin, month_start_day, vault_type = vault
-    vaults = get_all_vaults() if is_admin else []
+    vaults = get_all_vaults()
     share_options = vault_share_options(
         vaults,
         vault_id
@@ -54,6 +56,13 @@ def edit_vault_dialog(vault):
         if share_id in selected_share_ids
     ]
 
+    new_vault_type = st.selectbox(
+        "Vault Type",
+        ["Individual", "Shared"],
+        index=0 if vault_type != "Shared" else 1,
+        key=f"edit_vault_type_{vault_id}"
+    )
+
     with st.form(f"edit_vault_{vault_id}"):
         new_name = st.text_input(
             "Vault Name",
@@ -62,19 +71,15 @@ def edit_vault_dialog(vault):
         new_pin = st.text_input(
             "New PIN",
             type="password",
+            max_chars=6,
             placeholder="Leave blank to keep current PIN"
-        )
-
-        new_vault_type = st.selectbox(
-            "Vault Type",
-            ["Individual", "Shared"],
-            index=0 if vault_type != "Shared" else 1
         )
 
         selected_share_names = st.multiselect(
             "Shared With",
             list(share_options.keys()),
-            default=selected_share_names
+            default=selected_share_names if new_vault_type == "Shared" else [],
+            disabled=new_vault_type == "Individual"
         )
 
         save_clicked, cancel_clicked = st.columns(2)
@@ -113,8 +118,8 @@ def edit_vault_dialog(vault):
                 st.error("Vault name is required.")
                 st.stop()
 
-            if new_pin and len(new_pin) < 4:
-                st.error("PIN must be at least 4 characters.")
+            if new_pin and (len(new_pin) < 4 or len(new_pin) > 6):
+                st.error("PIN must be between 4 and 6 characters.")
                 st.stop()
 
             try:
@@ -180,6 +185,12 @@ def delete_vault_dialog(vault):
 def render_create_vault_form(form_key):
     vaults = get_all_vaults()
 
+    vault_type = st.selectbox(
+        "Vault Type",
+        ["Individual", "Shared"],
+        key=f"{form_key}_vault_type"
+    )
+
     with st.form(form_key):
         name_col, pin_col, admin_col = st.columns(
             [1.4, 1.1, 1.3],
@@ -198,6 +209,7 @@ def render_create_vault_form(form_key):
                 "PIN",
                 type="password",
                 placeholder="Enter 4-digit PIN",
+                max_chars=6,
                 key=f"{form_key}_pin"
             )
 
@@ -207,20 +219,16 @@ def render_create_vault_form(form_key):
                 key=f"{form_key}_admin"
             )
 
-        vault_type = st.selectbox(
-            "Vault Type",
-            ["Individual", "Shared"],
-            key=f"{form_key}_vault_type"
-        )
-
         share_options = {
             vault[1]: vault[0]
             for vault in vaults
+            if vault[4] == "Individual"
         }
 
         selected_share_names = st.multiselect(
             "Shared With",
             list(share_options.keys()),
+            disabled=vault_type == "Individual",
             key=f"{form_key}_shared_with"
         )
 
@@ -256,8 +264,8 @@ def render_create_vault_form(form_key):
                 st.error("PIN is required.")
                 st.stop()
 
-            if len(pin) < 4:
-                st.error("PIN must be at least 4 characters.")
+            if len(pin) < 4 or len(pin) > 6:
+                st.error("PIN must be between 4 and 6 characters.")
                 st.stop()
 
             if vault_type == "Shared" and not shared_vault_ids:
@@ -272,6 +280,9 @@ def render_create_vault_form(form_key):
                     vault_type=vault_type,
                     shared_vault_ids=shared_vault_ids
                 )
+            except ValueError as error:
+                st.error(str(error))
+                st.stop()
             except IntegrityError:
                 st.error("A vault with this name already exists.")
                 st.stop()
@@ -280,7 +291,7 @@ def render_create_vault_form(form_key):
 
 
 def render_vault_actions(vault):
-    vault_id, name, is_admin, _month_start_day, _vault_type = vault
+    vault_id, name, is_admin, _month_start_day, vault_type = vault
 
     if hasattr(st, "popover"):
         with st.popover("⋮"):
@@ -292,36 +303,37 @@ def render_vault_actions(vault):
                 st.session_state.edit_vault_id = vault_id
                 st.rerun()
 
-            if bool(is_admin):
-                if st.button(
-                    "Demote",
-                    key=f"demote_vault_{vault_id}",
-                    use_container_width=True
-                ):
-                    if get_admin_count() == 1:
-                        st.error("Cannot remove the last admin.")
-                        st.stop()
+            if vault_type != "Shared":
+                if bool(is_admin):
+                    if st.button(
+                        "Demote",
+                        key=f"demote_vault_{vault_id}",
+                        use_container_width=True
+                    ):
+                        if get_admin_count() == 1:
+                            st.error("Cannot remove the last admin.")
+                            st.stop()
 
-                    demote_admin(name)
-                    refresh_current_vault(
-                        vault_id,
-                        name,
-                        False
-                    )
-                    st.rerun()
-            else:
-                if st.button(
-                    "Promote",
-                    key=f"promote_vault_{vault_id}",
-                    use_container_width=True
-                ):
-                    promote_to_admin(name)
-                    refresh_current_vault(
-                        vault_id,
-                        name,
-                        True
-                    )
-                    st.rerun()
+                        demote_admin(name)
+                        refresh_current_vault(
+                            vault_id,
+                            name,
+                            False
+                        )
+                        st.rerun()
+                else:
+                    if st.button(
+                        "Promote",
+                        key=f"promote_vault_{vault_id}",
+                        use_container_width=True
+                    ):
+                        promote_to_admin(name)
+                        refresh_current_vault(
+                            vault_id,
+                            name,
+                            True
+                        )
+                        st.rerun()
 
             if st.button(
                 "Delete",
@@ -402,20 +414,22 @@ def render_vaults_table(vaults):
 
 def render_user_details(vault):
     vault_id, name, is_admin, month_start_day, _vault_type = vault
+    settings = get_vault_financial_settings(vault_id)
+    monthly_savings_goal = float(settings[1] if settings else 0)
 
     st.markdown(
         """
         <div class="mv-settings-card mv-settings-user-card">
             <h3>User Details</h3>
-            <p>Manage your own vault profile and month setup.</p>
+            <p>Manage your own vault profile and financial cycle setup.</p>
         </div>
         """,
         unsafe_allow_html=True
     )
 
     with st.form("user_details_form"):
-        name_col, pin_col, day_col = st.columns(
-            [1.4, 1.1, 1.0],
+        name_col, pin_col, day_col, goal_col = st.columns(
+            [1.35, 1.05, 0.85, 1.0],
             vertical_alignment="center"
         )
 
@@ -429,17 +443,29 @@ def render_user_details(vault):
             new_pin = st.text_input(
                 "New PIN",
                 type="password",
+                max_chars=6,
                 placeholder="Leave blank to keep current PIN"
             )
 
         with day_col:
             new_month_start_day = st.number_input(
-                "Month Start Date",
+                "Financial Cycle Start Day",
                 min_value=1,
                 max_value=28,
                 value=int(month_start_day or 1),
                 step=1
             )
+
+        with goal_col:
+            new_monthly_savings_goal = st.number_input(
+                "Monthly Savings Goal",
+                min_value=0.0,
+                value=monthly_savings_goal,
+                step=0.01,
+                format="%.2f"
+            )
+
+        st.caption("This determines how your financial periods are organised.")
 
         left, right = st.columns(2)
 
@@ -465,8 +491,8 @@ def render_user_details(vault):
                 st.error("Name is required.")
                 st.stop()
 
-            if new_pin and len(new_pin) < 4:
-                st.error("PIN must be at least 4 characters.")
+            if new_pin and (len(new_pin) < 4 or len(new_pin) > 6):
+                st.error("PIN must be between 4 and 6 characters.")
                 st.stop()
 
             try:
@@ -474,7 +500,8 @@ def render_user_details(vault):
                     vault_id,
                     new_name,
                     pin=new_pin or None,
-                    month_start_day=new_month_start_day
+                    month_start_day=new_month_start_day,
+                    monthly_savings_goal=new_monthly_savings_goal
                 )
             except ValueError as error:
                 st.error(str(error))

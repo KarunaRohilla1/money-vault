@@ -59,7 +59,9 @@ def show_template_dialog(
             "Amount",
             value=float(current_amount),
             min_value=0.0,
-            step=100.0,
+            step=0.01,
+            placeholder="Enter Amount",
+            format="%.2f",
             disabled=read_only
         )
 

@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import datetime
 
 from db.accounts import (
@@ -8,15 +9,34 @@ from db.accounts import (
 )
 from db.cache import cache_data
 from db.core import get_connection
+from db.financial_cycles import get_current_cycle
 from db.planning import (
     get_commitments,
     get_income_templates,
     get_monthly_planning_totals
 )
+from db.shared_expenses import (
+    get_actual_category_spending,
+    get_personal_spend_summary,
+    get_settlement_summary
+)
+
+
+def month_bounds_iso(year, month):
+    last_day = monthrange(
+        year,
+        month
+    )[1]
+
+    return (
+        f"{year:04d}-{month:02d}-01",
+        f"{year:04d}-{month:02d}-{last_day:02d}"
+    )
 
 
 @cache_data(ttl=60)
 def get_dashboard_page_data(vault_id):
+    active_cycle = get_current_cycle(vault_id)
 
     conn = get_connection()
     try:
@@ -25,31 +45,32 @@ def get_dashboard_page_data(vault_id):
             """
             WITH cycle AS (
                 SELECT
-                    COALESCE(
-                        (
-                            SELECT month
-                            FROM monthly_cycles
-                            WHERE vault_id = ?
-                            AND status = 'ACTIVE'
-                            ORDER BY year DESC, month DESC
-                            LIMIT 1
-                        ),
-                        EXTRACT(MONTH FROM CURRENT_DATE)::int
-                    ) AS month,
-                    COALESCE(
-                        (
-                            SELECT year
-                            FROM monthly_cycles
-                            WHERE vault_id = ?
-                            AND status = 'ACTIVE'
-                            ORDER BY year DESC, month DESC
-                            LIMIT 1
-                        ),
-                        EXTRACT(YEAR FROM CURRENT_DATE)::int
-                    ) AS year
+                    ?::date AS start_date,
+                    ?::date AS end_date,
+                    ?::int AS month,
+                    ?::int AS year
             ),
             onboarding AS (
                 SELECT
+                    (
+                        SELECT COUNT(*)
+                        FROM vaults
+                        WHERE id = ?
+                        AND COALESCE(pin_hash, '') != ''
+                    ) AS vault_login,
+                    (
+                        SELECT COUNT(*)
+                        FROM vaults
+                        WHERE id = ?
+                        AND COALESCE(financial_cycle_start_day, month_start_day, 0)
+                            BETWEEN 1 AND 28
+                    ) AS cycle_setting,
+                    (
+                        SELECT COUNT(*)
+                        FROM vaults
+                        WHERE id = ?
+                        AND COALESCE(monthly_savings_goal, 0) > 0
+                    ) AS savings_goal,
                     (
                         SELECT COUNT(*)
                         FROM accounts
@@ -115,8 +136,7 @@ def get_dashboard_page_data(vault_id):
                 CROSS JOIN cycle c
                 WHERE t.vault_id = ?
                 AND t.is_deleted = 0
-                AND to_char(t.date::date, 'YYYY-MM')
-                    = CONCAT(c.year::text, '-', LPAD(c.month::text, 2, '0'))
+                AND t.date::date BETWEEN c.start_date AND c.end_date
             ),
             commitment_totals AS (
                 SELECT COALESCE(SUM(
@@ -148,32 +168,25 @@ def get_dashboard_page_data(vault_id):
                             WHEN type = 'Credit Card' AND balance < 0 THEN ABS(balance)
                             ELSE 0
                         END
-                    ), 0) AS credit_card_due
+                    ), 0) AS credit_card_due,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN balance > 0 THEN balance
+                            ELSE 0
+                        END
+                    ), 0) AS total_assets,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN balance < 0 THEN ABS(balance)
+                            ELSE 0
+                        END
+                    ), 0) AS total_liabilities
                 FROM account_balances
             ),
-            category_spending AS (
-                SELECT COALESCE(
-                    json_agg(
-                        json_build_array(name, amount)
-                        ORDER BY amount DESC
-                    ),
-                    '[]'::json
-                ) AS rows
-                FROM (
-                    SELECT
-                        c.name,
-                        SUM(t.amount) AS amount
-                    FROM transactions t
-                    JOIN categories c
-                        ON t.category_id = c.id
-                    CROSS JOIN cycle cy
-                    WHERE t.vault_id = ?
-                    AND t.is_deleted = 0
-                    AND t.transaction_type = 'Expense'
-                    AND to_char(t.date::date, 'YYYY-MM')
-                        = CONCAT(cy.year::text, '-', LPAD(cy.month::text, 2, '0'))
-                    GROUP BY c.name
-                ) data
+            vault_settings AS (
+                SELECT COALESCE(monthly_savings_goal, 0) AS monthly_savings_goal
+                FROM vaults
+                WHERE id = ?
             ),
             recent_activity AS (
                 SELECT COALESCE(
@@ -219,6 +232,9 @@ def get_dashboard_page_data(vault_id):
                 onboarding.accounts,
                 onboarding.income_templates,
                 onboarding.commitments,
+                onboarding.vault_login,
+                onboarding.cycle_setting,
+                onboarding.savings_goal,
                 cycle.month,
                 cycle.year,
                 COALESCE(primary_account.name, 'Primary Account'),
@@ -228,19 +244,26 @@ def get_dashboard_page_data(vault_id):
                 commitment_totals.remaining,
                 cash_totals.available_cash,
                 cash_totals.credit_card_due,
-                category_spending.rows,
+                cash_totals.total_assets,
+                cash_totals.total_liabilities,
+                vault_settings.monthly_savings_goal,
                 recent_activity.rows
             FROM onboarding
             CROSS JOIN cycle
             CROSS JOIN transaction_totals
             CROSS JOIN commitment_totals
             CROSS JOIN cash_totals
-            CROSS JOIN category_spending
+            CROSS JOIN vault_settings
             CROSS JOIN recent_activity
             LEFT JOIN primary_account
                 ON TRUE
             """,
             (
+                active_cycle.start_iso,
+                active_cycle.end_iso,
+                active_cycle.start_month,
+                active_cycle.start_year,
+                vault_id,
                 vault_id,
                 vault_id,
                 vault_id,
@@ -258,44 +281,93 @@ def get_dashboard_page_data(vault_id):
         accounts = row[0]
         income_templates = row[1]
         commitments = row[2]
-        remaining_commitments = row[9]
-        available_cash = row[10]
-        credit_card_due = row[11]
+        remaining_commitments = row[12]
+        available_cash = row[13]
+        credit_card_due = row[14]
+        total_assets = row[15]
+        total_liabilities = row[16]
+        monthly_savings_goal = row[17]
+        start_date, end_date = active_cycle.start_iso, active_cycle.end_iso
+        spend_summary = get_personal_spend_summary(
+            vault_id,
+            start_date,
+            end_date
+        )
+        settlement_balance = spend_summary[
+            "settlement_balance"
+        ]
+        settlement_summary = get_settlement_summary(
+            vault_id,
+            start_date,
+            end_date
+        )
+        actual_income = row[10]
         safe_to_spend = max(
             available_cash
+            - settlement_summary["payable"]
             - remaining_commitments
-            - credit_card_due,
+            - credit_card_due
+            - monthly_savings_goal,
             0
         )
+        actual_savings = max(
+            actual_income - spend_summary["actual_spending"],
+            0
+        )
+        category_spending = [
+            (
+                row[1],
+                row[2]
+            )
+            for row in get_actual_category_spending(
+                vault_id,
+                start_date,
+                end_date
+            )
+        ]
 
         return {
             "status": {
                 "accounts": accounts,
                 "income_templates": income_templates,
                 "commitments": commitments,
+                "has_vault_login": row[3] > 0,
+                "has_cycle_setting": row[4] > 0,
+                "has_savings_goal": row[5] > 0,
                 "has_accounts": accounts > 0,
                 "has_income_templates": income_templates > 0,
                 "has_commitments": commitments > 0,
                 "is_complete": (
                     accounts > 0
-                    and income_templates > 0
-                    and commitments > 0
+                    and row[3] > 0
+                    and row[4] > 0
+                    and row[5] > 0
                 )
             },
             "summary": {
-                "month": row[3],
-                "year": row[4],
-                "income": row[7],
-                "primary_account_name": row[5],
-                "primary_account_balance": row[6],
+                "month": row[6],
+                "year": row[7],
+                "income": actual_income,
+                "primary_account_name": row[8],
+                "primary_account_balance": row[9],
                 "available_cash": available_cash,
+                "total_assets": total_assets,
+                "total_liabilities": total_liabilities,
+                "net_worth": total_assets - total_liabilities,
+                "monthly_savings_goal": monthly_savings_goal,
+                "actual_savings": actual_savings,
                 "remaining_commitments": remaining_commitments,
-                "expenses": row[8],
+                "expenses": spend_summary["actual_spending"],
+                "personal_expenses": spend_summary["personal_spending"],
+                "shared_paid": spend_summary["shared_paid"],
+                "shared_share": spend_summary["own_shared_share"],
+                "settlement_balance": settlement_balance,
+                "settlement_summary": settlement_summary,
                 "credit_card_due": credit_card_due,
                 "safe_to_spend": safe_to_spend
             },
-            "category_spending": row[12] or [],
-            "recent_activity": row[13] or []
+            "category_spending": category_spending,
+            "recent_activity": row[18] or []
         }
 
 
@@ -325,32 +397,8 @@ def get_account_count(vault_id):
         conn.close()
 @cache_data(ttl=60)
 def get_dashboard_cycle(vault_id):
-
-    conn = get_connection()
-    try:
-
-        row = conn.execute(
-            """
-            SELECT month, year
-            FROM monthly_cycles
-            WHERE vault_id = ?
-            AND status = 'ACTIVE'
-            ORDER BY year DESC, month DESC
-            LIMIT 1
-            """,
-            (vault_id,)
-        ).fetchone()
-
-
-        if row:
-            return row[0], row[1]
-
-        today = datetime.now()
-        return today.month, today.year
-
-
-    finally:
-        conn.close()
+    cycle = get_current_cycle(vault_id)
+    return cycle.start_month, cycle.start_year
 def get_cycle_filter(vault_id):
 
     month, year = get_dashboard_cycle(vault_id)
@@ -358,12 +406,17 @@ def get_cycle_filter(vault_id):
     return f"{year:04d}-{month:02d}"
 
 
+def get_cycle_bounds(vault_id):
+    cycle = get_current_cycle(vault_id)
+    return cycle.start_iso, cycle.end_iso
+
+
 @cache_data(ttl=60)
 def get_transaction_count_this_month(vault_id):
 
     conn = get_connection()
     try:
-        cycle_filter = get_cycle_filter(vault_id)
+        start_date, end_date = get_cycle_bounds(vault_id)
 
         count = conn.execute(
             """
@@ -373,12 +426,12 @@ def get_transaction_count_this_month(vault_id):
             WHERE vault_id = ?
             AND is_deleted = 0
 
-            AND to_char(date::date, 'YYYY-MM')
-                = ?
+            AND date::date BETWEEN ? AND ?
             """,
             (
                 vault_id,
-                cycle_filter
+                start_date,
+                end_date
             )
         ).fetchone()[0]
 
@@ -393,7 +446,7 @@ def get_income_this_month(vault_id):
 
     conn = get_connection()
     try:
-        cycle_filter = get_cycle_filter(vault_id)
+        start_date, end_date = get_cycle_bounds(vault_id)
 
         total = conn.execute(
             """
@@ -406,12 +459,12 @@ def get_income_this_month(vault_id):
             AND is_deleted = 0
             AND transaction_type = 'Income'
 
-            AND to_char(date::date, 'YYYY-MM')
-                = ?
+            AND date::date BETWEEN ? AND ?
             """,
             (
                 vault_id,
-                cycle_filter
+                start_date,
+                end_date
             )
         ).fetchone()[0]
 
@@ -426,7 +479,7 @@ def get_expense_this_month(vault_id):
 
     conn = get_connection()
     try:
-        cycle_filter = get_cycle_filter(vault_id)
+        start_date, end_date = get_cycle_bounds(vault_id)
 
         total = conn.execute(
             """
@@ -439,12 +492,12 @@ def get_expense_this_month(vault_id):
             AND is_deleted = 0
             AND transaction_type = 'Expense'
 
-            AND to_char(date::date, 'YYYY-MM')
-                = ?
+            AND date::date BETWEEN ? AND ?
             """,
             (
                 vault_id,
-                cycle_filter
+                start_date,
+                end_date
             )
         ).fetchone()[0]
 
@@ -470,6 +523,22 @@ def get_remaining_commitments(vault_id):
 @cache_data(ttl=60)
 def get_onboarding_status(vault_id):
 
+    conn = get_connection()
+    try:
+        settings = conn.execute(
+            """
+            SELECT
+                COALESCE(pin_hash, ''),
+                COALESCE(financial_cycle_start_day, month_start_day, 0),
+                COALESCE(monthly_savings_goal, 0)
+            FROM vaults
+            WHERE id = ?
+            """,
+            (vault_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
     accounts = len(
         get_accounts(vault_id)
     )
@@ -490,6 +559,16 @@ def get_onboarding_status(vault_id):
 
         "commitments": commitments,
 
+        "has_vault_login": bool(settings and settings[0]),
+
+        "has_cycle_setting": bool(
+            settings and 1 <= int(settings[1] or 0) <= 28
+        ),
+
+        "has_savings_goal": bool(
+            settings and float(settings[2] or 0) > 0
+        ),
+
         "has_accounts": accounts > 0,
 
         "has_income_templates":
@@ -500,15 +579,19 @@ def get_onboarding_status(vault_id):
 
         "is_complete": (
 
+            bool(settings and settings[0])
+
+            and
+
+            bool(settings and 1 <= int(settings[1] or 0) <= 28)
+
+            and
+
+            bool(settings and float(settings[2] or 0) > 0)
+
+            and
+
             accounts > 0
-
-            and
-
-            income_templates > 0
-
-            and
-
-            commitments > 0
 
         )
 
@@ -553,6 +636,7 @@ def get_available_cash(vault_id):
 
 @cache_data(ttl=60)
 def get_dashboard_summary(vault_id):
+    active_cycle = get_current_cycle(vault_id)
 
     conn = get_connection()
     try:
@@ -561,28 +645,10 @@ def get_dashboard_summary(vault_id):
             """
             WITH cycle AS (
                 SELECT
-                    COALESCE(
-                        (
-                            SELECT month
-                            FROM monthly_cycles
-                            WHERE vault_id = ?
-                            AND status = 'ACTIVE'
-                            ORDER BY year DESC, month DESC
-                            LIMIT 1
-                        ),
-                        EXTRACT(MONTH FROM CURRENT_DATE)::int
-                    ) AS month,
-                    COALESCE(
-                        (
-                            SELECT year
-                            FROM monthly_cycles
-                            WHERE vault_id = ?
-                            AND status = 'ACTIVE'
-                            ORDER BY year DESC, month DESC
-                            LIMIT 1
-                        ),
-                        EXTRACT(YEAR FROM CURRENT_DATE)::int
-                    ) AS year
+                    ?::date AS start_date,
+                    ?::date AS end_date,
+                    ?::int AS month,
+                    ?::int AS year
             ),
             account_balances AS (
                 SELECT
@@ -630,8 +696,7 @@ def get_dashboard_summary(vault_id):
                 CROSS JOIN cycle c
                 WHERE t.vault_id = ?
                 AND t.is_deleted = 0
-                AND to_char(t.date::date, 'YYYY-MM')
-                    = CONCAT(c.year::text, '-', LPAD(c.month::text, 2, '0'))
+                AND t.date::date BETWEEN c.start_date AND c.end_date
             ),
             commitment_totals AS (
                 SELECT COALESCE(SUM(
@@ -684,8 +749,10 @@ def get_dashboard_summary(vault_id):
                 ON TRUE
             """,
             (
-                vault_id,
-                vault_id,
+                active_cycle.start_iso,
+                active_cycle.end_iso,
+                active_cycle.start_month,
+                active_cycle.start_year,
                 vault_id,
                 vault_id,
                 vault_id
@@ -702,24 +769,55 @@ def get_dashboard_summary(vault_id):
         remaining_commitments = row[6]
         available_cash = row[7]
         credit_card_due = row[8]
+        monthly_savings_goal = conn.execute(
+            """
+            SELECT COALESCE(monthly_savings_goal, 0)
+            FROM vaults
+            WHERE id = ?
+            """,
+            (vault_id,)
+        ).fetchone()[0]
+        start_date, end_date = active_cycle.start_iso, active_cycle.end_iso
+        spend_summary = get_personal_spend_summary(
+            vault_id,
+            start_date,
+            end_date
+        )
+        settlement_balance = spend_summary[
+            "settlement_balance"
+        ]
+        settlement_summary = get_settlement_summary(
+            vault_id,
+            start_date,
+            end_date
+        )
+        actual_income = income
 
         safe_to_spend = max(
             available_cash
+            - settlement_summary["payable"]
             - remaining_commitments
-            - credit_card_due,
+            - credit_card_due
+            - monthly_savings_goal,
             0
         )
 
         return {
             "month": month,
             "year": year,
-            "income": income,
+            "income": actual_income,
             "primary_account_name": primary_account_name,
             "primary_account_balance": primary_account_balance,
             "available_cash": available_cash,
             "remaining_commitments": remaining_commitments,
-            "expenses": expenses,
+            "expenses": spend_summary["actual_spending"],
+            "personal_expenses": spend_summary["personal_spending"],
+            "shared_paid": spend_summary["shared_paid"],
+            "shared_share": spend_summary["own_shared_share"],
+            "settlement_balance": settlement_balance,
+            "settlement_summary": settlement_summary,
             "credit_card_due": credit_card_due,
+            "monthly_savings_goal": monthly_savings_goal,
             "safe_to_spend": safe_to_spend
         }
 
@@ -731,28 +829,19 @@ def get_category_spending_this_month(vault_id):
 
     conn = get_connection()
     try:
-        cycle_filter = get_cycle_filter(vault_id)
-
-        data = conn.execute(
-            """
-            SELECT
-                c.name,
-                SUM(t.amount)
-            FROM transactions t
-            JOIN categories c
-                ON t.category_id = c.id
-            WHERE t.vault_id = ?
-                AND t.transaction_type = 'Expense'
-                AND to_char(t.date::date, 'YYYY-MM')
-                    = ?
-            GROUP BY c.name
-            ORDER BY SUM(t.amount) DESC
-            """,
+        start_date, end_date = get_cycle_bounds(vault_id)
+        rows = get_actual_category_spending(
+            vault_id,
+            start_date,
+            end_date
+        )
+        data = [
             (
-                vault_id,
-                cycle_filter
+                row[1],
+                row[2]
             )
-        ).fetchall()
+            for row in rows
+        ]
 
 
         return data

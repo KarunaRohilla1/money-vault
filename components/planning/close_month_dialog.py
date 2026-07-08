@@ -7,7 +7,7 @@ def show_close_month_dialog(
     on_confirm=None
 ):
 
-    @st.dialog(f"🔒 Close {month_name}", width="large")
+    @st.dialog("Close Cycle", width="large")
     def dialog():
 
         if not pending_items:
@@ -17,7 +17,7 @@ def show_close_month_dialog(
             )
 
             if st.button(
-                f"🔒 Close {month_name}",
+                "Close Cycle",
                 type="primary",
                 use_container_width=True
             ):
@@ -47,7 +47,7 @@ def show_close_month_dialog(
 
         st.markdown(f"""
         <div class="close-header">
-            <div class="close-subtitle">Review the remaining obligations before closing this month.</div>
+            <div class="close-subtitle">Review the remaining obligations before closing {month_name}.</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -120,7 +120,9 @@ def show_close_month_dialog(
                     st.number_input(
                         "Actual",
                         min_value=0.0,
-                        step=100.0,
+                        step=0.01,
+                        placeholder="Enter Amount",
+                        format="%.2f",
                         key=amount_key,
                         label_visibility="visible"
                     )
@@ -192,7 +194,7 @@ def show_close_month_dialog(
         with st.container(border=True):
 
             st.markdown(
-                "<div class='close-summary-title'>MONTH SUMMARY</div>",
+                "<div class='close-summary-title'>CYCLE SUMMARY</div>",
                 unsafe_allow_html=True
             )
 
@@ -210,8 +212,8 @@ def show_close_month_dialog(
             st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
             st.caption(
-                "Closing this month will lock all activities. "
-                "This action cannot be undone."
+                "Closing this financial cycle marks it completed "
+                "and starts the next cycle."
             )
 
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
@@ -233,7 +235,7 @@ def show_close_month_dialog(
             with right:
 
                 if st.button(
-                    f"🔒 Close {month_name}",
+                    "Close Cycle",
                     type="primary",
                     use_container_width=True
                 ):

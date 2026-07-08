@@ -19,6 +19,24 @@ ICONS = [
     ("💼", "Salary")
 ]
 
+ICONS = [
+    ("🏷️", "Default"),
+    ("🛒", "Groceries"),
+    ("🏡", "Home"),
+    ("🍽", "Dining Out"),
+    ("☕", "Coffee"),
+    ("🛵", "Food Delivery"),
+    ("⛽", "Fuel"),
+    ("🚕", "Transport"),
+    ("🏥", "Medical"),
+    ("💪", "Fitness"),
+    ("🛍", "Shopping"),
+    ("🎬", "Entertainment"),
+    ("📺", "Subscriptions"),
+    ("✈️", "Travel"),
+    ("📦", "Miscellaneous")
+]
+
 
 # ==================================================
 # ADD CATEGORY
@@ -102,6 +120,18 @@ def edit_category_dialog(category):
     emoji = category[1]
     name = category[2]
     category_type = category[3]
+    is_system = bool(category[5]) if len(category) > 5 else False
+
+    if is_system:
+        st.warning(
+            "System categories cannot be edited."
+        )
+        if st.button(
+            "Close",
+            use_container_width=True
+        ):
+            st.rerun()
+        return
 
     icon_lookup = {
         label: icon
@@ -207,9 +237,13 @@ def delete_category_dialog(category_id):
             use_container_width=True
         ):
 
-            delete_category(
-                category_id
-            )
+            try:
+                delete_category(
+                    category_id
+                )
+            except ValueError as error:
+                st.error(str(error))
+                st.stop()
 
             st.success(
                 "Category deleted"
@@ -352,6 +386,14 @@ def show_categories(vault_id):
 
         filtered.append(category)
 
+    filtered.sort(
+        key=lambda category: (
+            bool(category[5]) if len(category) > 5 else False,
+            (category[4] or "").lower() if len(category) > 4 else "",
+            category[2].lower()
+        )
+    )
+
     st.divider()
 
     # =====================================
@@ -376,6 +418,8 @@ def show_categories(vault_id):
         icon = category[1]
         name = category[2]
         category_type = category[3]
+        parent_category = category[4] if len(category) > 4 else None
+        is_system = bool(category[5]) if len(category) > 5 else False
 
         c1, c2, c3, c4 = st.columns(
             [0.75, 5.25, 2, 1.5],
@@ -401,7 +445,8 @@ def show_categories(vault_id):
                     {name}
                 </div>
                 <div class="mv-account-type">
-                    Category
+                    {"System category" if is_system else "Custom category"}
+                    {f" · {parent_category}" if parent_category else ""}
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -428,6 +473,19 @@ def show_categories(vault_id):
             )
 
         with c4:
+
+            if is_system:
+                st.markdown(
+                    """
+                    <div class="mv-category-pill-wrapper">
+                        <div class="mv-category-pill mv-category-income">
+                            System
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                continue
 
             b1, b2 = st.columns(2)
 

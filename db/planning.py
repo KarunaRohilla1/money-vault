@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from db.core import (
     EXPENSE,
@@ -9,6 +9,9 @@ from db.core import (
     upsert_linked_transaction
 )
 from db.cache import cache_data, clear_data_cache
+from db.financial_cycles import (
+    get_cycle_for_date
+)
 
 
 def add_commitment(
@@ -21,6 +24,22 @@ def add_commitment(
 
     conn = get_connection()
     try:
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM commitments
+            WHERE vault_id = ?
+            AND LOWER(name) = LOWER(?)
+            AND is_active = 1
+            """,
+            (
+                vault_id,
+                name.strip()
+            )
+        ).fetchone()
+
+        if existing:
+            raise ValueError("A recurring commitment with this name already exists.")
 
         conn.execute(
             """
@@ -136,6 +155,22 @@ def update_commitment(
 
     conn = get_connection()
     try:
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM income_templates
+            WHERE vault_id = ?
+            AND LOWER(name) = LOWER(?)
+            AND is_active = 1
+            """,
+            (
+                vault_id,
+                name.strip()
+            )
+        ).fetchone()
+
+        if existing:
+            raise ValueError("A recurring income with this name already exists.")
 
         conn.execute(
             """
@@ -665,100 +700,25 @@ def get_cycle(
     month,
     year
 ):
-
-    conn = get_connection()
-    try:
-
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT *
-
-            FROM monthly_cycles
-
-            WHERE vault_id=?
-            AND month=?
-            AND year=?
-            """,
-            (
-                vault_id,
-                month,
-                year
-            )
-        )
-
-        cycle = cursor.fetchone()
-
-
-        return cycle
-
-
-    finally:
-        conn.close()
+    context = get_cycle_for_date(
+        vault_id,
+        date(year, month, 1).isoformat()
+    )
+    return (
+        context.id,
+        context.vault_id,
+        context.start_month,
+        context.start_year,
+        context.status,
+        context.start_iso,
+        context.end_iso
+    )
 def create_cycle(vault_id, month, year):
-
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-
-        today = datetime.now()
-
-        if year == today.year and month == today.month:
-            status = "ACTIVE"
-        else:
-            status = "PLANNED"
-
-        cursor.execute(
-            """
-            INSERT INTO monthly_cycles
-            (
-                vault_id,
-                month,
-                year,
-                status
-            )
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (vault_id, month, year) DO NOTHING
-            """,
-            (
-                vault_id,
-                month,
-                year,
-                status
-            )
-        )
-        changed_rows = cursor.rowcount
-
-        # If this month already existed as PLANNED and it has now
-        # become the current month, activate it automatically.
-
-        if status == "ACTIVE":
-
-            cursor.execute(
-                """
-                UPDATE monthly_cycles
-                SET status = 'ACTIVE'
-                WHERE vault_id = ?
-                AND month = ?
-                AND year = ?
-                AND status = 'PLANNED'
-                """,
-                (
-                    vault_id,
-                    month,
-                    year
-                )
-            )
-            changed_rows += cursor.rowcount
-
-        conn.commit()
-        if changed_rows:
-            clear_data_cache()
-
-
-    finally:
-        conn.close()
+    context = get_cycle_for_date(
+        vault_id,
+        date(year, month, 1).isoformat()
+    )
+    return context.id
 def get_next_month(month, year):
 
     if month == 12:
@@ -837,6 +797,133 @@ def get_monthly_planning_totals(vault_id, month, year):
             "remaining_commitments": row[2]
         }
 
+
+    finally:
+        conn.close()
+
+
+@cache_data(ttl=60)
+def get_cycle_planning_summary(vault_id, month, year, start_date, end_date):
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            WITH income_totals AS (
+                SELECT
+                    COALESCE(SUM(i.amount), 0) AS planned,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN s.status = 'RECEIVED'
+                                THEN COALESCE(s.actual_amount, i.amount)
+                            ELSE 0
+                        END
+                    ), 0) AS received
+                FROM income_templates i
+                LEFT JOIN income_status s
+                    ON s.income_template_id = i.id
+                    AND s.month = ?
+                    AND s.year = ?
+                WHERE i.vault_id = ?
+                AND i.is_active = 1
+            ),
+            commitment_totals AS (
+                SELECT
+                    COALESCE(SUM(c.amount), 0) AS planned,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN s.status = 'PAID'
+                                THEN COALESCE(s.actual_amount, c.amount)
+                            ELSE 0
+                        END
+                    ), 0) AS completed,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN COALESCE(s.status, 'PENDING') IN (
+                                'PENDING',
+                                'CARRIED_FORWARD'
+                            )
+                                THEN COALESCE(s.actual_amount, c.amount)
+                            ELSE 0
+                        END
+                    ), 0) AS remaining
+                FROM commitments c
+                LEFT JOIN obligation_status s
+                    ON s.commitment_id = c.id
+                    AND s.month = ?
+                    AND s.year = ?
+                WHERE c.vault_id = ?
+                AND c.is_active = 1
+            ),
+            transaction_totals AS (
+                SELECT
+                    COALESCE(SUM(
+                        CASE
+                            WHEN transaction_type = 'Expense' THEN amount
+                            ELSE 0
+                        END
+                    ), 0) AS expenses
+                FROM transactions
+                WHERE vault_id = ?
+                AND is_deleted = 0
+                AND date::date BETWEEN ?::date AND ?::date
+            ),
+            settings AS (
+                SELECT COALESCE(monthly_savings_goal, 0) AS savings_goal
+                FROM vaults
+                WHERE id = ?
+            )
+            SELECT
+                income_totals.planned,
+                income_totals.received,
+                commitment_totals.planned,
+                commitment_totals.completed,
+                commitment_totals.remaining,
+                transaction_totals.expenses,
+                settings.savings_goal
+            FROM income_totals
+            CROSS JOIN commitment_totals
+            CROSS JOIN transaction_totals
+            CROSS JOIN settings
+            """,
+            (
+                month,
+                year,
+                vault_id,
+                month,
+                year,
+                vault_id,
+                vault_id,
+                start_date,
+                end_date,
+                vault_id
+            )
+        ).fetchone()
+
+        income_planned = float(row[0] or 0)
+        income_received = float(row[1] or 0)
+        commitments_planned = float(row[2] or 0)
+        commitments_completed = float(row[3] or 0)
+        remaining_commitments = float(row[4] or 0)
+        expenses = float(row[5] or 0)
+        savings_goal = float(row[6] or 0)
+        projected_savings = max(
+            income_planned
+            - expenses
+            - commitments_planned,
+            0
+        )
+
+        return {
+            "income_planned": income_planned,
+            "income_received": income_received,
+            "commitments_planned": commitments_planned,
+            "commitments_completed": commitments_completed,
+            "remaining_commitments": remaining_commitments,
+            "expenses": expenses,
+            "savings_goal": savings_goal,
+            "projected_savings": projected_savings
+        }
 
     finally:
         conn.close()

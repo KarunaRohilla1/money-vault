@@ -28,6 +28,7 @@ def add_transfer(
             INSERT INTO transactions
             (
                 vault_id,
+                beneficiary_vault_id,
                 account_id,
                 date,
                 amount,
@@ -35,9 +36,10 @@ def add_transfer(
                 notes,
                 transfer_group_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                vault_id,
                 vault_id,
                 from_account_id,
                 transfer_date,
@@ -53,6 +55,7 @@ def add_transfer(
             INSERT INTO transactions
             (
                 vault_id,
+                beneficiary_vault_id,
                 account_id,
                 date,
                 amount,
@@ -60,9 +63,10 @@ def add_transfer(
                 notes,
                 transfer_group_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                vault_id,
                 vault_id,
                 to_account_id,
                 transfer_date,

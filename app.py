@@ -8,10 +8,13 @@ from db.schema import (
     migrate_database
 )
 from db.vaults import (
+    get_connected_shared_vaults,
+    get_vault_by_id,
     get_vaults,
     vault_exists,
     verify_pin
 )
+from db.cache import clear_data_cache
 
 
 PROFILED_PAGES = {
@@ -19,8 +22,28 @@ PROFILED_PAGES = {
     "Accounts",
     "Transactions",
     "Planning",
-    "Reports"
+    "Reports",
+    "Shared Expenses",
+    "Bills"
 }
+
+PERSONAL_MENU_ITEMS = [
+    "Dashboard",
+    "Accounts",
+    "Planning",
+    "Transactions",
+    "Transfers",
+    "Reports",
+    "Categories",
+    "Wishlist",
+    "Settings"
+]
+
+SHARED_MENU_ITEMS = [
+    "Dashboard",
+    "Shared Expenses",
+    "Bills"
+]
 
 @st.cache_data(show_spinner=False)
 def get_css():
@@ -39,8 +62,9 @@ def load_css():
 
 @st.cache_resource(show_spinner=False)
 def bootstrap_database():
+    initialize_database()
+
     if os.environ.get("MONEY_VAULT_RUN_RUNTIME_MIGRATIONS") == "1":
-        initialize_database()
         migrate_database()
     return True
 
@@ -56,6 +80,173 @@ def render_profiled_page(page_name, render_function, *args):
 
         if page_name in PROFILED_PAGES:
             print(f"[money-vault perf] {page_name}: {elapsed:.3f}s")
+
+
+def get_navigation_items(vault_type):
+    if vault_type == "Shared":
+        return SHARED_MENU_ITEMS
+
+    return PERSONAL_MENU_ITEMS
+
+
+def clear_authentication_state():
+    for key in [
+        "authenticated",
+        "vault_id",
+        "vault_name",
+        "is_admin",
+        "active_vault_id",
+        "active_vault_name",
+        "original_personal_vault_id",
+        "original_personal_vault_name",
+        "original_personal_is_admin",
+        "pending_shared_vault_id",
+        "pending_shared_vault_name",
+        "shared_global_page"
+    ]:
+        if key in st.session_state:
+            del st.session_state[key]
+
+    clear_data_cache()
+
+
+def activate_vault(vault_id, vault_name, is_admin):
+    st.session_state.vault_id = vault_id
+    st.session_state.vault_name = vault_name
+    st.session_state.active_vault_id = vault_id
+    st.session_state.active_vault_name = vault_name
+    st.session_state.is_admin = bool(is_admin)
+    clear_data_cache()
+
+
+def render_vault_switcher(current_vault, vault_type):
+    active_name = st.session_state.vault_name
+
+    with st.sidebar.expander(
+        f"{active_name} ▼",
+        expanded=False
+    ):
+        if vault_type == "Shared":
+            st.markdown(f"🏠 **{active_name}**")
+
+            original_id = st.session_state.get(
+                "original_personal_vault_id"
+            )
+            original_name = st.session_state.get(
+                "original_personal_vault_name"
+            )
+
+            if original_id and original_name:
+                if st.button(
+                    f"👤 Return to {original_name}",
+                    use_container_width=True
+                ):
+                    activate_vault(
+                        original_id,
+                        original_name,
+                        st.session_state.get(
+                            "original_personal_is_admin",
+                            False
+                        )
+                    )
+                    st.rerun()
+
+        else:
+            st.markdown(f"✓ **{active_name}**")
+
+            personal_id = st.session_state.get(
+                "original_personal_vault_id",
+                st.session_state.vault_id
+            )
+            shared_vaults = get_connected_shared_vaults(
+                personal_id
+            )
+
+            for shared_vault in shared_vaults:
+                shared_id = shared_vault[0]
+                shared_name = shared_vault[1]
+
+                if st.button(
+                    f"🏠 Switch to {shared_name}",
+                    use_container_width=True,
+                    key=f"switch_shared_{shared_id}"
+                ):
+                    st.session_state.pending_shared_vault_id = shared_id
+                    st.session_state.pending_shared_vault_name = shared_name
+
+            pending_id = st.session_state.get(
+                "pending_shared_vault_id"
+            )
+            pending_name = st.session_state.get(
+                "pending_shared_vault_name"
+            )
+
+            if pending_id and pending_name:
+                pin = st.text_input(
+                    f"{pending_name} PIN",
+                    type="password",
+                    key="shared_switch_pin"
+                )
+
+                if st.button(
+                    "Unlock Shared",
+                    use_container_width=True
+                ):
+                    shared_vault = verify_pin(
+                        pending_name,
+                        pin
+                    )
+
+                    if shared_vault and int(shared_vault[0]) == int(pending_id):
+                        activate_vault(
+                            shared_vault[0],
+                            shared_vault[1],
+                            shared_vault[3]
+                        )
+                        st.session_state.pending_shared_vault_id = None
+                        st.session_state.pending_shared_vault_name = None
+                        st.rerun()
+
+                    else:
+                        st.error("Incorrect Shared vault PIN.")
+
+        if st.button(
+            "Logout",
+            use_container_width=True
+        ):
+            clear_authentication_state()
+            st.rerun()
+
+
+def render_sidebar_navigation(vault_type):
+    menu_items = get_navigation_items(vault_type)
+
+    page = st.sidebar.radio(
+        "Navigation",
+        menu_items,
+        key=f"navigation_{vault_type}"
+    )
+
+    if vault_type == "Shared":
+        previous_page = st.session_state.get(
+            "shared_navigation_previous"
+        )
+        if previous_page != page:
+            st.session_state.shared_global_page = None
+            st.session_state.shared_navigation_previous = page
+
+        st.sidebar.divider()
+        if st.sidebar.button(
+            "Settings",
+            use_container_width=True,
+            key="global_settings_button"
+        ):
+            st.session_state.shared_global_page = "Settings"
+
+        if st.session_state.get("shared_global_page"):
+            page = st.session_state.shared_global_page
+
+    return page
 
 
 st.set_page_config(
@@ -83,6 +274,21 @@ if "vault_name" not in st.session_state:
 
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
+
+if "active_vault_id" not in st.session_state:
+    st.session_state.active_vault_id = st.session_state.vault_id
+
+if "active_vault_name" not in st.session_state:
+    st.session_state.active_vault_name = st.session_state.vault_name
+
+if "original_personal_vault_id" not in st.session_state:
+    st.session_state.original_personal_vault_id = None
+
+if "original_personal_vault_name" not in st.session_state:
+    st.session_state.original_personal_vault_name = None
+
+if "original_personal_is_admin" not in st.session_state:
+    st.session_state.original_personal_is_admin = False
 
 
 # -------------------
@@ -119,9 +325,25 @@ if not st.session_state.authenticated:
         if vault:
 
             st.session_state.authenticated = True
-            st.session_state.vault_id = vault[0]
-            st.session_state.vault_name = vault[1]
-            st.session_state.is_admin = bool(vault[3])
+            activate_vault(
+                vault[0],
+                vault[1],
+                vault[3]
+            )
+
+            vault_details = get_vault_by_id(
+                vault[0]
+            )
+            logged_in_vault_type = (
+                vault_details[4]
+                if vault_details and len(vault_details) > 4
+                else "Individual"
+            )
+
+            if logged_in_vault_type == "Individual":
+                st.session_state.original_personal_vault_id = vault[0]
+                st.session_state.original_personal_vault_name = vault[1]
+                st.session_state.original_personal_is_admin = bool(vault[3])
 
             st.rerun()
 
@@ -134,6 +356,14 @@ if not st.session_state.authenticated:
 # -------------------
 
 else:
+    current_vault = get_vault_by_id(
+        st.session_state.vault_id
+    )
+    vault_type = (
+        current_vault[4]
+        if current_vault and len(current_vault) > 4
+        else "Individual"
+    )
 
     st.sidebar.markdown(
     f"""
@@ -146,29 +376,23 @@ else:
     unsafe_allow_html=True
 )
 
-    if st.sidebar.button("Logout"):
-
-        st.session_state.authenticated = False
-        st.session_state.vault_id = None
-        st.session_state.vault_name = None
-        st.session_state.is_admin = False
-
-        st.rerun()
-
-    page = st.sidebar.radio(
-        "Navigation",
-        [
-            "Dashboard",
-            "Accounts",
-            "Planning",
-            "Transactions",
-            "Transfers",
-            "Reports",
-            "Categories",
-            "Wishlist",
-            "Settings"
-        ]
+    render_vault_switcher(
+        current_vault,
+        vault_type
     )
+
+    page = render_sidebar_navigation(
+        vault_type
+    )
+
+    previous_page = st.session_state.get("current_page")
+    if page != previous_page:
+        if page == "Planning":
+            st.session_state.pop(
+                "planning_selected_cycle_start",
+                None
+            )
+        st.session_state.current_page = page
 
     if page == "Dashboard":
         from views.dashboard import show_dashboard
@@ -249,5 +473,24 @@ else:
         render_profiled_page(
             page,
             show_reports,
+            st.session_state.vault_id
+        )
+
+    elif page == "Shared Expenses":
+        from views.shared_expenses import show_shared_expenses
+
+        render_profiled_page(
+            page,
+            show_shared_expenses,
+            st.session_state.vault_id,
+            st.session_state.vault_name
+        )
+
+    elif page == "Bills":
+        from views.shared_auxiliary import show_shared_bills
+
+        render_profiled_page(
+            page,
+            show_shared_bills,
             st.session_state.vault_id
         )
