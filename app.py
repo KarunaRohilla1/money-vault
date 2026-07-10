@@ -5,9 +5,9 @@ import streamlit as st
 
 from db.schema import (
     initialize_database,
-    migrate_database,
-    setup_application_data
+    migrate_database
 )
+from db.core import setup_application_data
 from db.vaults import (
     get_connected_shared_vaults,
     get_vault_by_id,
