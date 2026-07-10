@@ -1,5 +1,7 @@
 import streamlit as st
 
+from components.money import format_money
+
 
 def show_close_month_dialog(
     month_name,
@@ -94,7 +96,7 @@ def show_close_month_dialog(
                             <div class="close-icon">{item['icon']}</div>
                             <div>
                                 <div class="close-name">{item['name']}</div>
-                                <div class="close-expected">Expected ₹{item['expected']:,.0f}</div>
+                                <div class="close-expected">Expected {format_money(item['expected'])}</div>
                                 <div
                                     style="
                                         display:inline-block;

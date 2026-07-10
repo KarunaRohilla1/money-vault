@@ -55,10 +55,21 @@ def add_account(
                 opening_balance,
                 1 if should_be_primary else 0
             )
+            ,
+            capture_lastrowid=False
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "accounts",
+            "dashboard",
+            "reports",
+            "planning",
+            "transactions",
+            "transfers",
+            "shared_expenses",
+            "shared_bills"
+        ))
 
     finally:
         conn.close()
@@ -178,7 +189,16 @@ def archive_account(account_id):
             )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "accounts",
+            "dashboard",
+            "reports",
+            "planning",
+            "transactions",
+            "transfers",
+            "shared_expenses",
+            "shared_bills"
+        ))
 
     finally:
         conn.close()
@@ -376,7 +396,16 @@ def update_account(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "accounts",
+            "dashboard",
+            "reports",
+            "planning",
+            "transactions",
+            "transfers",
+            "shared_expenses",
+            "shared_bills"
+        ))
 
     finally:
         conn.close()
@@ -444,7 +473,16 @@ def set_primary_account(account_id):
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "accounts",
+            "dashboard",
+            "reports",
+            "planning",
+            "transactions",
+            "transfers",
+            "shared_expenses",
+            "shared_bills"
+        ))
 
     finally:
         conn.close()

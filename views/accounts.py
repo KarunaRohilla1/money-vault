@@ -1,5 +1,6 @@
 import streamlit as st
 
+from components.money import format_money
 from db.accounts import (
     ACCOUNT_TYPES,
     account_exists,
@@ -279,8 +280,8 @@ def show_accounts(vault_id):
         <div class="mv-assets-hero">
             <div class="mv-assets-left">
                 <div class="mv-assets-label">NET WORTH</div>
-                <div class="mv-assets-value">₹{net_worth:,.0f}</div>
-                <div class="mv-networth-breakdown">Assets: ₹{assets:,.0f} • Liabilities: ₹{liabilities:,.0f}</div>
+                <div class="mv-assets-value">{format_money(net_worth)}</div>
+                <div class="mv-networth-breakdown">Assets: {format_money(assets)} • Liabilities: {format_money(liabilities)}</div>
             </div>
             <div class="mv-assets-divider"></div>
             <div class="mv-assets-stat">
@@ -358,7 +359,7 @@ unsafe_allow_html=True
                 st.markdown(
                         f"""
                         <div style="text-align:right;">
-                            <div class="mv-account-amount">₹{abs(balance):,.0f}</div>
+                            <div class="mv-account-amount">{format_money(abs(balance))}</div>
                             <div
                                 class="mv-account-label"
                                 style="color:{balance_color};"

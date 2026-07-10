@@ -1,5 +1,6 @@
 import streamlit as st
 from datetime import date
+from components.money import format_money
 from components.planning.icons import (
     get_commitment_icon,
     get_income_icon
@@ -255,22 +256,22 @@ def show_planning(vault_id):
     hero_metrics = [
         (
             "Income Planned",
-            f"&#8377;{cycle_summary['income_planned']:,.0f}",
+            format_money(cycle_summary["income_planned"]),
             "success"
         ),
         (
             "Income Received",
-            f"&#8377;{cycle_summary['income_received']:,.0f}",
+            format_money(cycle_summary["income_received"]),
             "success"
         ),
         (
             "Remaining Commitments",
-            f"&#8377;{cycle_summary['remaining_commitments']:,.0f}",
+            format_money(cycle_summary["remaining_commitments"]),
             "danger"
         ),
         (
             "Projected Savings",
-            f"&#8377;{cycle_summary['projected_savings']:,.0f}",
+            format_money(cycle_summary["projected_savings"]),
             "accent"
         )
     ]
@@ -363,7 +364,7 @@ def show_planning(vault_id):
             with column:
                 st.metric(
                     label,
-                    f"₹{amount:,.0f}"
+                    format_money(amount)
                 )
 
     empty_messages = []

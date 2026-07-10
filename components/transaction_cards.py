@@ -2,6 +2,7 @@ from datetime import datetime
 
 import streamlit as st
 
+from components.money import format_money
 from db.transactions import get_recent_activity_transactions
 
 
@@ -57,7 +58,7 @@ def show_recent_transactions(vault_id, limit=5, transactions=None):
                     <div class="activity-date">{date}</div>
                 </div>
             </div>
-            <div class="{amount_class}">\u20b9{amount:,.0f}</div>
+            <div class="{amount_class}">{format_money(amount)}</div>
         </div>
         """
 

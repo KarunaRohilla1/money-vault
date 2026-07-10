@@ -10,6 +10,7 @@ from components.cards import (
 )
 from components.add_shared_expense_modal import add_shared_expense_dialog
 from components.header import dashboard_header
+from components.money import format_money
 from components.spending_insights import show_spending_insights
 from components.transaction_cards import show_recent_transactions
 from db.dashboard import (
@@ -25,10 +26,6 @@ from db.shared_expenses import (
     settle_outstanding_settlement
 )
 from db.vaults import get_vault_by_id
-
-
-def format_money(amount):
-    return f"₹{amount:,.0f}"
 
 
 def account_option_label(account):
@@ -342,7 +339,7 @@ def render_shared_spending_panel(participants, total_spending):
                             width=1
                         )
                     ),
-                    hovertemplate="%{label}<br>%{value:,.0f}<br>%{percent}<extra></extra>",
+                    hovertemplate="%{label}<br>%{value:,.2f}<br>%{percent}<extra></extra>",
                     textinfo="none"
                 )
             ]
@@ -784,7 +781,7 @@ def show_dashboard(vault_id):
 
         hero_card(
             "SAFE TO SPEND",
-            f"₹{dashboard['safe_to_spend']:,.0f}",
+            format_money(dashboard["safe_to_spend"]),
             message=get_spending_message(
                 dashboard["safe_to_spend"]
             ),
@@ -802,7 +799,7 @@ def show_dashboard(vault_id):
 
             metric_card(
                 dashboard["primary_account_name"],
-                f"₹{dashboard['primary_account_balance']:,.0f}",
+                format_money(dashboard["primary_account_balance"]),
                 "salary"
             )
 
@@ -810,7 +807,7 @@ def show_dashboard(vault_id):
 
             metric_card(
                 "Remaining Commitments",
-                f"₹{dashboard['remaining_commitments']:,.0f}",
+                format_money(dashboard["remaining_commitments"]),
                 "expense"
             )
 
@@ -820,7 +817,7 @@ def show_dashboard(vault_id):
 
             metric_card(
                 "Credit Card Due",
-                f"₹{dashboard['credit_card_due']:,.0f}",
+                format_money(dashboard["credit_card_due"]),
                 "credit"
             )
 
@@ -828,7 +825,7 @@ def show_dashboard(vault_id):
 
             metric_card(
                 "Expenses This Cycle",
-                f"₹{dashboard['expenses']:,.0f}",
+                format_money(dashboard["expenses"]),
                 "expense"
             )
 
@@ -875,27 +872,27 @@ def show_dashboard(vault_id):
 
             | Component | Amount | Meaning |
             |---|---:|---|
-            | Available Cash | ₹{dashboard['available_cash']:,.0f} | Current spendable cash. Expenses already reduce this balance when recorded. |
-            | You Owe | -₹{dashboard['settlement_summary']['payable']:,.0f} | Shared settlement money you still need to pay. |
-            | Remaining Commitments | -₹{dashboard['remaining_commitments']:,.0f} | Bills/commitments still pending this cycle. |
-            | Credit Card Due | -₹{dashboard['credit_card_due']:,.0f} | Current unpaid credit card balance. |
-            | Savings Goal | -₹{dashboard['monthly_savings_goal']:,.0f} | Money reserved for savings. |
+            | Available Cash | {format_money(dashboard['available_cash'])} | Current spendable cash. Expenses already reduce this balance when recorded. |
+            | You Owe | -{format_money(dashboard['settlement_summary']['payable'])} | Shared settlement money you still need to pay. |
+            | Remaining Commitments | -{format_money(dashboard['remaining_commitments'])} | Bills/commitments still pending this cycle. |
+            | Credit Card Due | -{format_money(dashboard['credit_card_due'])} | Current unpaid credit card balance. |
+            | Savings Goal | -{format_money(dashboard['monthly_savings_goal'])} | Money reserved for savings. |
 
-            **Safe To Spend = ₹{dashboard['safe_to_spend']:,.0f}**
+            **Safe To Spend = {format_money(dashboard['safe_to_spend'])}**
 
             Outstanding settlements are tracked separately as
-            ₹{dashboard['settlement_summary']['amount']:,.0f}.
+            {format_money(dashboard['settlement_summary']['amount'])}.
             Money owed to you is not counted as spendable cash until it is
             actually settled into an account.
 
-            Expenses this cycle are shown separately as ₹{dashboard['expenses']:,.0f}.
+            Expenses this cycle are shown separately as {format_money(dashboard['expenses'])}.
             They are not subtracted again here because they have already reduced
             your account balances.
 
             **Net Worth**
-            
-            Assets: ₹{dashboard['total_assets']:,.0f}  
-            Liabilities: ₹{dashboard['total_liabilities']:,.0f}  
-            Net Worth: ₹{dashboard['net_worth']:,.0f}
+
+            Assets: {format_money(dashboard['total_assets'])}
+            Liabilities: {format_money(dashboard['total_liabilities'])}
+            Net Worth: {format_money(dashboard['net_worth'])}
             """
         )

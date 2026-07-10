@@ -1,5 +1,7 @@
 import streamlit as st
 
+from components.money import format_money
+
 
 def transaction_timeline_card(transaction_id,
     icon,
@@ -35,7 +37,7 @@ def transaction_timeline_card(transaction_id,
                         {notes_html} </div>
                     </div>
                 <div class="transaction-right">
-                    <div class="{amount_class}">₹{amount:,.0f}</div>
+                    <div class="{amount_class}">{format_money(amount)}</div>
                 </div>
             </div>
         </div>""",

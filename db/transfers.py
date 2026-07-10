@@ -48,6 +48,8 @@ def add_transfer(
                 notes,
                 transfer_group_id
             )
+            ,
+            capture_lastrowid=False
         )
 
         conn.execute(
@@ -75,10 +77,18 @@ def add_transfer(
                 notes,
                 transfer_group_id
             )
+            ,
+            capture_lastrowid=False
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "transfers",
+            "transactions",
+            "accounts",
+            "dashboard",
+            "reports"
+        ))
 
         return transfer_group_id
 
@@ -271,7 +281,13 @@ def update_transfer(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "transfers",
+            "transactions",
+            "accounts",
+            "dashboard",
+            "reports"
+        ))
 
 
     finally:
@@ -292,7 +308,13 @@ def delete_transfer(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "transfers",
+            "transactions",
+            "accounts",
+            "dashboard",
+            "reports"
+        ))
 
     finally:
         conn.close()

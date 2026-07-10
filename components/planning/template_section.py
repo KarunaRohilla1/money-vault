@@ -1,5 +1,7 @@
 import streamlit as st
 
+from components.money import format_money
+
 
 def render_template_table(
     rows,
@@ -41,7 +43,7 @@ def render_template_table(
             f"""
             <div class="commitment-row">
                 <div class="commitment-cell commitment-name">{icon} {name}</div>
-                <div class="commitment-cell">₹{amount:,.0f}</div>
+                <div class="commitment-cell">{format_money(amount)}</div>
                 <div class="commitment-cell">{due_day}</div>
                 <div class="commitment-cell">🏦 {account_name}</div>
             </div>

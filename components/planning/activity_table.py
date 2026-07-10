@@ -1,5 +1,8 @@
 import streamlit as st
 
+from components.money import format_money
+from components.responsive import mobile_label
+
 
 def render_activity_row(
     *,
@@ -31,7 +34,7 @@ def render_activity_row(
 
         st.markdown(
             f"""
-            <div style="
+            <div class="mv-mobile-labeled" {mobile_label("Obligation")} style="
                 display:flex;
                 align-items:center;
                 height:42px;
@@ -52,13 +55,13 @@ def render_activity_row(
 
         st.markdown(
             f"""
-            <div style="
+            <div class="mv-mobile-labeled" {mobile_label("Expected")} style="
                 display:flex;
                 align-items:center;
                 height:42px;
                 font-size:18px;
             ">
-                ₹{expected:,.0f}
+                {format_money(expected)}
             </div>
             """,
             unsafe_allow_html=True
@@ -72,7 +75,7 @@ def render_activity_row(
         left, middle, right = st.columns([4, 1, 1])
         with left:
             actual_input = st.text_input(
-                "",
+                "Actual",
                 value=str(
                     int(actual)
                     if actual is not None
@@ -103,7 +106,7 @@ def render_activity_row(
 
         st.markdown(
             f"""
-            <div style="
+            <div class="mv-mobile-labeled" {mobile_label("Due")} style="
                 display:flex;
                 align-items:center;
                 height:42px;
@@ -143,7 +146,7 @@ def render_activity_row(
 
         st.markdown(
             f"""
-            <div style="
+            <div class="mv-mobile-labeled" {mobile_label("Status")} style="
                 display:flex;
                 align-items:center;
                 height:42px;

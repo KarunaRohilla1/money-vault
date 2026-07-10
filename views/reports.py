@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from components.money import format_money
 from db.cache import cache_data
 from db.core import EXPENSE, INCOME, TRANSFER_OUT, get_connection
 from db.financial_cycles import (
@@ -37,10 +38,6 @@ MATERIAL_REPORT_ICONS = {
     "calendar_month",
     "label"
 }
-
-
-def format_money(amount):
-    return f"₹{float(amount or 0):,.0f}"
 
 
 def is_shared_vault(vault_id):
@@ -1104,7 +1101,7 @@ def render_category_chart_panel(title, subtitle, rows):
         textinfo="percent",
         hovertemplate=(
             "%{label}<br>"
-            "Amount: ₹%{value:,.0f}<br>"
+            "Amount: ₹%{value:,.2f}<br>"
             "%{percent}<extra></extra>"
         ),
         marker=dict(
@@ -1236,7 +1233,7 @@ def render_trend(data, shared=False):
             fillcolor="rgba(139, 92, 246, 0.18)",
             hovertemplate=(
                 "%{x}<br>"
-                f"{metric}: ₹%{{y:,.0f}}"
+                f"{metric}: ₹%{{y:,.2f}}"
                 "<extra></extra>"
             )
         )

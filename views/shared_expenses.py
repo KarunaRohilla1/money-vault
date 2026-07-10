@@ -5,6 +5,9 @@ import pandas as pd
 import streamlit as st
 from dateutil.relativedelta import relativedelta
 
+from components.add_shared_expense_modal import add_shared_expense_dialog
+from components.edit_shared_expense_modal import show_edit_shared_expense_dialog
+from components.responsive import mobile_label
 from db.shared_expenses import get_shared_expenses_page_data
 from db.financial_cycles import get_current_cycle
 from views.dashboard import format_money
@@ -62,11 +65,6 @@ def summary_card(icon, title, value, subtitle, tone):
 
 
 def expense_row(expense, current_name, other_label):
-    settlement_amount = (
-        format_money(expense["settlement_amount"])
-        if expense["settlement_amount"]
-        else format_money(0)
-    )
     merchant = expense["merchant"] or expense["category"]
 
     return (
@@ -78,29 +76,24 @@ def expense_row(expense, current_name, other_label):
         f'<div class="mv-shared-expense-meta">{format_date(expense["date"])} &bull; {escape(merchant)}</div>'
         '</div>'
         '</div>'
-        '<div class="mv-shared-expense-paidby">'
+        f'<div class="mv-shared-expense-paidby mv-mobile-labeled" {mobile_label("Paid By")}>'
         '<div class="mv-shared-avatar">'
         f'{escape(expense["paid_by"][:1].upper())}'
         '</div>'
         f'<span>{escape(expense["paid_by"])}</span>'
         '</div>'
-        '<div class="mv-shared-expense-split">'
+        f'<div class="mv-shared-expense-split mv-mobile-labeled" {mobile_label("Split")}>'
         f'<strong>{escape(expense["split_label"])}</strong>'
         f'<span>{escape(expense["allocation_method"])}</span>'
         '</div>'
-        '<div class="mv-shared-expense-share">'
+        f'<div class="mv-shared-expense-share mv-mobile-labeled" {mobile_label(f"{current_name} Share")}>'
         f'<strong>{format_money(expense["my_share"])}</strong>'
         f'<span>{escape(current_name)} Share</span>'
         '</div>'
-        '<div class="mv-shared-expense-share">'
+        f'<div class="mv-shared-expense-share mv-mobile-labeled" {mobile_label(f"{other_label} Share")}>'
         f'<strong>{format_money(expense["other_share"])}</strong>'
         f'<span>{escape(other_label)} Share</span>'
         '</div>'
-        f'<div class="mv-shared-expense-status {expense["settlement_tone"]}">'
-        f'<strong>{settlement_amount}</strong>'
-        f'<span>{escape(expense["settlement_label"])}</span>'
-        '</div>'
-        '<div class="mv-shared-expense-chevron material-symbols-outlined">chevron_right</div>'
         '</div>'
     )
 
@@ -114,15 +107,35 @@ def show_shared_expenses(shared_vault_id, vault_name):
     if limit_key not in st.session_state:
         st.session_state[limit_key] = INITIAL_LIMIT
 
-    st.markdown(
-        """
-        <div class="mv-shared-expense-header">
-            <h1>Shared Expenses</h1>
-            <p>All expenses that belong to our household.</p>
-        </div>
-        """,
-        unsafe_allow_html=True
+    header_col, action_col = st.columns(
+        [8, 2],
+        vertical_alignment="center"
     )
+
+    with header_col:
+        st.markdown(
+            """
+            <div class="mv-shared-expense-header">
+                <h1>Shared Expenses</h1>
+                <p>All expenses that belong to our household.</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with action_col:
+        if st.button(
+            "Add Shared Expense",
+            use_container_width=True,
+            key="shared_expenses_add_button"
+        ):
+            st.session_state.show_shared_expense_dialog = True
+
+    if st.session_state.get("show_shared_expense_dialog"):
+        st.session_state.show_shared_expense_dialog = False
+        add_shared_expense_dialog(
+            shared_vault_id
+        )
 
     initial_data = get_shared_expenses_page_data(
         shared_vault_id,
@@ -218,13 +231,26 @@ def show_shared_expenses(shared_vault_id, vault_name):
         st.session_state[limit_key] = INITIAL_LIMIT
         st.session_state[filter_state_key] = current_filter_state
 
-    data = get_shared_expenses_page_data(
-        shared_vault_id,
-        start_date.isoformat(),
-        end_date.isoformat(),
-        category_id=category_options[selected_category],
-        paid_by_vault_id=paid_by_options[selected_paid_by]
+    selected_category_id = category_options[selected_category]
+    selected_paid_by_id = paid_by_options[selected_paid_by]
+    uses_default_data = (
+        selected_range == "This Cycle"
+        and selected_category_id is None
+        and selected_paid_by_id is None
+        and start_date == default_start
+        and end_date == default_end
     )
+
+    if uses_default_data:
+        data = initial_data
+    else:
+        data = get_shared_expenses_page_data(
+            shared_vault_id,
+            start_date.isoformat(),
+            end_date.isoformat(),
+            category_id=selected_category_id,
+            paid_by_vault_id=selected_paid_by_id
+        )
 
     current_participant = data["current_participant"]
     current_name = (
@@ -283,9 +309,7 @@ def show_shared_expenses(shared_vault_id, vault_name):
                     "Paid By": expense["paid_by"],
                     "Split": expense["split_label"],
                     current_share_header: expense["my_share"],
-                    other_share_header: expense["other_share"],
-                    "Settlement Amount": expense["settlement_amount"],
-                    "Settlement Status": expense["settlement_label"]
+                    other_share_header: expense["other_share"]
                 }
                 for expense in all_expenses
             ])
@@ -308,30 +332,81 @@ def show_shared_expenses(shared_vault_id, vault_name):
         '<div>Split</div>'
         f'<div>{escape(current_share_header)}</div>'
         f'<div>{escape(other_share_header)}</div>'
-        '<div>Settlement</div>'
-        '<div></div>'
         '</div>'
     )
-    rows_html = "".join(
-        expense_row(
-            expense,
-            current_name,
-            other_label
-        )
-        for expense in visible_expenses
-    )
-
-    if not rows_html:
-        rows_html = (
-            '<div class="mv-shared-empty tall">'
-            'No shared expenses match these filters.'
-            '</div>'
-        )
 
     st.markdown(
-        headers + '<div class="mv-shared-expense-list">' + rows_html + '</div>',
+        headers,
         unsafe_allow_html=True
     )
+
+    if not visible_expenses:
+        st.markdown(
+            (
+                '<div class="mv-shared-expense-list">'
+                '<div class="mv-shared-empty tall">'
+                'No shared expenses match these filters.'
+                '</div>'
+                '</div>'
+            ),
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            '<div class="mv-shared-expense-list">',
+            unsafe_allow_html=True
+        )
+
+        for expense in visible_expenses:
+            row_col, action_col = st.columns(
+                [20, 1],
+                vertical_alignment="center"
+            )
+
+            with row_col:
+                st.markdown(
+                    expense_row(
+                        expense,
+                        current_name,
+                        other_label
+                    ),
+                    unsafe_allow_html=True
+                )
+
+            with action_col:
+                if st.button(
+                    "→",
+                    key=f"edit_shared_expense_{expense['id']}",
+                    use_container_width=True
+                ):
+                    st.session_state.edit_shared_expense_id = expense["id"]
+
+        st.markdown(
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+    selected_expense_id = st.session_state.get(
+        "edit_shared_expense_id"
+    )
+
+    if selected_expense_id:
+        st.session_state.edit_shared_expense_id = None
+
+        selected_expense = next(
+            (
+                expense
+                for expense in all_expenses
+                if expense["id"] == selected_expense_id
+            ),
+            None
+        )
+
+        if selected_expense:
+            show_edit_shared_expense_dialog(
+                shared_vault_id,
+                selected_expense
+            )
 
     st.markdown(
         f"""

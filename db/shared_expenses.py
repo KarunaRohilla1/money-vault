@@ -818,6 +818,8 @@ def settle_outstanding_settlement(
                 notes,
                 transfer_group_id
             )
+            ,
+            capture_lastrowid=False
         )
         cursor.execute(
             """
@@ -844,10 +846,20 @@ def settle_outstanding_settlement(
                 notes,
                 transfer_group_id
             )
+            ,
+            capture_lastrowid=False
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "shared_expenses",
+            "transaction_shares",
+            "transactions",
+            "accounts",
+            "dashboard",
+            "reports",
+            "transfers"
+        ))
         return transfer_group_id
 
     finally:

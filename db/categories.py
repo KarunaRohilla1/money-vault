@@ -1,6 +1,5 @@
 from db.core import (
     DEFAULT_CATEGORY_NAME,
-    ensure_default_category,
     get_connection
 )
 from db.cache import cache_data, clear_data_cache
@@ -64,10 +63,20 @@ def add_category(
                 emoji,
                 category_type
             )
+            ,
+            capture_lastrowid=False
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "categories",
+            "transactions",
+            "dashboard",
+            "reports",
+            "planning",
+            "shared_expenses",
+            "shared_bills"
+        ))
 
         return True
 
@@ -81,11 +90,6 @@ def add_category(
 
 @cache_data(ttl=60)
 def get_categories(vault_id):
-
-    ensure_default_category(
-        vault_id
-    )
-
     conn = get_connection()
     try:
 
@@ -157,7 +161,15 @@ def move_category_transactions(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "categories",
+            "transactions",
+            "dashboard",
+            "reports",
+            "planning",
+            "shared_expenses",
+            "shared_bills"
+        ))
 
 
     finally:
@@ -192,17 +204,20 @@ def delete_category(category_id):
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "categories",
+            "transactions",
+            "dashboard",
+            "reports",
+            "planning",
+            "shared_expenses",
+            "shared_bills"
+        ))
 
     finally:
         conn.close()
 @cache_data(ttl=60)
 def get_category_dropdown(vault_id):
-
-    ensure_default_category(
-        vault_id
-    )
-
     conn = get_connection()
     try:
 
@@ -337,7 +352,15 @@ def update_category(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "categories",
+            "transactions",
+            "dashboard",
+            "reports",
+            "planning",
+            "shared_expenses",
+            "shared_bills"
+        ))
 
     finally:
         conn.close()

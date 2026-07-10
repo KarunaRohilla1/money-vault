@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+from components.money import format_money
 from db.dashboard import (
     get_category_spending_this_month
 )
@@ -60,6 +61,7 @@ def show_spending_insights(vault_id, category_data=None):
 
     fig.update_traces(
         textinfo="none",
+        hovertemplate="%{label}<br>%{value:,.2f}<br>%{percent}<extra></extra>",
         marker=dict(
             line=dict(
                 color="rgba(255,255,255,0.08)",
@@ -98,7 +100,7 @@ def show_spending_insights(vault_id, category_data=None):
         annotations=[
             dict(
                 text=(
-                    f"<b>₹{total_spent:,.0f}</b>"
+                    f"<b>{format_money(total_spent)}</b>"
                     "<br>"
                     "<span style='font-size:14px'>Total Spent</span>"
                 ),

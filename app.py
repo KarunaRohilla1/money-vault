@@ -5,7 +5,8 @@ import streamlit as st
 
 from db.schema import (
     initialize_database,
-    migrate_database
+    migrate_database,
+    setup_application_data
 )
 from db.vaults import (
     get_connected_shared_vaults,
@@ -66,6 +67,8 @@ def bootstrap_database():
 
     if os.environ.get("MONEY_VAULT_RUN_RUNTIME_MIGRATIONS") == "1":
         migrate_database()
+
+    setup_application_data()
     return True
 
 
@@ -116,7 +119,6 @@ def activate_vault(vault_id, vault_name, is_admin):
     st.session_state.active_vault_id = vault_id
     st.session_state.active_vault_name = vault_name
     st.session_state.is_admin = bool(is_admin)
-    clear_data_cache()
 
 
 def render_vault_switcher(current_vault, vault_type):

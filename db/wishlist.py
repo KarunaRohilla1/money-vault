@@ -26,10 +26,12 @@ def add_wishlist_category(vault_id, name):
                 vault_id,
                 category_name
             )
+            ,
+            capture_lastrowid=False
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache(("wishlist",))
 
     finally:
         conn.close()
@@ -167,7 +169,7 @@ def update_wishlist_category(category_id, vault_id, old_name, new_name):
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache(("wishlist",))
 
 
     finally:
@@ -219,10 +221,12 @@ def delete_wishlist_category(category_id, vault_id, name, fallback="General"):
                 vault_id,
                 fallback
             )
+            ,
+            capture_lastrowid=False
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache(("wishlist",))
 
 
     finally:
@@ -268,10 +272,12 @@ def add_wishlist_item(
                 image_url,
                 notes
             )
+            ,
+            capture_lastrowid=False
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache(("wishlist",))
 
     finally:
         conn.close()
@@ -439,7 +445,7 @@ def update_wishlist_item(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache(("wishlist",))
 
 
     finally:
@@ -458,7 +464,7 @@ def delete_wishlist_item(item_id):
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache(("wishlist",))
 
     finally:
         conn.close()

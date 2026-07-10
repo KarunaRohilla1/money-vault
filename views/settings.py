@@ -1,5 +1,6 @@
 import streamlit as st
 
+from components.responsive import mobile_label
 from db.postgres import IntegrityError
 from db.vaults import (
     create_vault,
@@ -375,7 +376,7 @@ def render_vaults_table(vaults):
         with row[0]:
             st.markdown(
                 f"""
-                <div class="mv-settings-vault-name">
+                <div class="mv-settings-vault-name mv-mobile-labeled" {mobile_label("Vault")}>
                     <span class="mv-settings-avatar">{vault_initial(name)}</span>
                     <strong>{name}</strong>
                 </div>
@@ -385,7 +386,7 @@ def render_vaults_table(vaults):
 
         with row[1]:
             st.markdown(
-                f'<div class="mv-settings-type">{vault_type}</div>',
+                f'<div class="mv-settings-type mv-mobile-labeled" {mobile_label("Type")}>{vault_type}</div>',
                 unsafe_allow_html=True
             )
 
@@ -395,7 +396,7 @@ def render_vaults_table(vaults):
             label = "Yes" if is_admin else "No"
             st.markdown(
                 f"""
-                <div class="mv-settings-admin {status_class}">
+                <div class="mv-settings-admin {status_class} mv-mobile-labeled" {mobile_label("Admin")}>
                     <span class="material-symbols-outlined">{icon}</span>
                     {label}
                 </div>
@@ -575,15 +576,6 @@ def show_settings(vault_id, is_admin):
             """,
             unsafe_allow_html=True
         )
-
-    with action_col:
-        if is_admin:
-            if st.button(
-                "+  Create Vault",
-                key="open_create_vault_dialog",
-                use_container_width=True
-            ):
-                create_vault_dialog()
 
     render_user_details(
         current_vault

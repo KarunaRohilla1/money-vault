@@ -197,7 +197,7 @@ class PostgresCursor:
     def rowcount(self):
         return self.raw_cursor.rowcount
 
-    def execute(self, sql, params=None):
+    def execute(self, sql, params=None, capture_lastrowid=True):
         translated = translate_sql(sql)
         params = tuple(params or ())
 
@@ -206,7 +206,10 @@ class PostgresCursor:
                 translated,
                 params
             )
-            self.capture_lastrowid(translated)
+            if capture_lastrowid:
+                self.capture_lastrowid(translated)
+            else:
+                self.lastrowid = None
         except errors.UndefinedColumn:
             if "pin_plain" in translated:
                 self.raw_cursor.connection.rollback()
@@ -285,11 +288,12 @@ class PostgresConnection:
             self.raw_connection.cursor()
         )
 
-    def execute(self, sql, params=None):
+    def execute(self, sql, params=None, capture_lastrowid=True):
         cursor = self.cursor()
         return cursor.execute(
             sql,
-            params
+            params,
+            capture_lastrowid=capture_lastrowid
         )
 
     def commit(self):

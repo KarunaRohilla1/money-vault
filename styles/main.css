@@ -728,6 +728,14 @@ h6 {
     font-size: 14px;
 }
 
+.mv-wishlist-item-notes {
+    color: #94A3B8;
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
 div[class*="st-key-edit_wishlist_"] button,
 div[class*="st-key-delete_wishlist_"] button {
     width: 48px;
@@ -2820,7 +2828,7 @@ div[data-testid="stForm"] button:hover {
 
 .mv-shared-expense-table-head {
     display: grid;
-    grid-template-columns: 2.5fr 1.15fr 0.82fr 1fr 1fr 1.2fr 34px;
+    grid-template-columns: 2.5fr 1.15fr 0.82fr 1fr 1fr;
     gap: 16px;
     padding: 0 24px 16px;
     color: #CBD5E1;
@@ -2838,7 +2846,7 @@ div[data-testid="stForm"] button:hover {
 
 .mv-shared-expense-row {
     display: grid;
-    grid-template-columns: 2.5fr 1.15fr 0.82fr 1fr 1fr 1.2fr 34px;
+    grid-template-columns: 2.5fr 1.15fr 0.82fr 1fr 1fr;
     gap: 16px;
     align-items: center;
     min-height: 92px;
@@ -4934,6 +4942,10 @@ div[data-testid="stPopover"] button {
     box-shadow: none !important;
 }
 
+.mv-mobile-only {
+    display: none;
+}
+
 @media (max-width: 900px) {
 
     .mv-transfer-table-head {
@@ -5026,9 +5038,28 @@ div[data-testid="stPopover"] button {
 
     div[data-testid="stPlotlyChart"],
     div[data-testid="stPlotlyChart"] > div,
-    div[data-testid="stPlotlyChart"] iframe {
+    div[data-testid="stPlotlyChart"] iframe,
+    div[data-testid="stPlotlyChart"] .js-plotly-plot,
+    div[data-testid="stPlotlyChart"] .plot-container,
+    div[data-testid="stPlotlyChart"] .svg-container {
         max-width: 100% !important;
         overflow: hidden;
+    }
+
+    .mv-mobile-only {
+        display: block;
+    }
+
+    .mv-mobile-labeled[data-mobile-label]::before {
+        content: attr(data-mobile-label);
+        display: block;
+        margin-bottom: 5px;
+        color: #94A3B8;
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        line-height: 1.2;
+        text-transform: uppercase;
     }
 
     .dashboard-header {
@@ -5065,6 +5096,12 @@ div[data-testid="stPopover"] button {
     .mv-wishlist-summary,
     .mv-settings-card,
     .mv-transfer-info,
+    .mv-shared-panel,
+    .mv-shared-stat,
+    .mv-shared-expense-summary,
+    .mv-shared-expense-list,
+    .mv-bill-table-panel,
+    .mv-bill-contribution-panel,
     .mv-onboarding-welcome,
     .mv-onboarding-complete {
         width: 100%;
@@ -5075,6 +5112,18 @@ div[data-testid="stPopover"] button {
         min-height: 260px;
         padding: 28px 24px;
         border-radius: 24px;
+    }
+
+    .hero-card.hero-card-horizontal,
+    .mv-settlement-card {
+        grid-template-columns: 1fr;
+        text-align: left;
+    }
+
+    .hero-card.hero-card-horizontal .hero-value,
+    .mv-settlement-amount {
+        text-align: left;
+        white-space: normal;
     }
 
     .hero-card .hero-value {
@@ -5088,6 +5137,65 @@ div[data-testid="stPopover"] button {
     .section-main-title {
         font-size: 27px;
         line-height: 1.15;
+    }
+
+    .mv-shared-topbar,
+    .mv-shared-top-actions,
+    .mv-shared-panel-head {
+        align-items: stretch;
+    }
+
+    .mv-shared-top-actions,
+    .mv-shared-panel-head {
+        flex-direction: column;
+    }
+
+    .mv-shared-topbar h1 {
+        font-size: 31px;
+    }
+
+    .mv-shared-topbar p {
+        font-size: 16px;
+    }
+
+    .mv-shared-stats,
+    .mv-shared-main-grid,
+    .mv-shared-spend-body,
+    .mv-shared-activity-grid,
+    .mv-bill-contribution-list,
+    .mv-cycle-banner {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+
+    .mv-shared-stat {
+        min-height: auto;
+        grid-template-columns: 58px minmax(0, 1fr);
+        padding: 20px;
+    }
+
+    .mv-shared-stat-title {
+        min-height: auto;
+        font-size: 16px;
+    }
+
+    .mv-shared-stat-value {
+        margin-top: 14px;
+        font-size: 32px;
+        overflow-wrap: anywhere;
+    }
+
+    .mv-shared-stat-subtitle {
+        margin-top: 12px;
+        font-size: 14px;
+    }
+
+    .mv-shared-panel {
+        padding: 20px 16px 0;
+    }
+
+    .mv-shared-panel-title {
+        font-size: 21px;
     }
 
     .cycle-hero {
@@ -5155,20 +5263,85 @@ div[data-testid="stPopover"] button {
     .table-header,
     .mv-transfer-table-head,
     .mv-wishlist-table-head,
-    .mv-settings-table-head {
+    .mv-settings-table-head,
+    .mv-shared-expense-table-head,
+    .mv-bill-table-head {
         display: none;
     }
 
     .commitment-row,
     .mv-wishlist-row,
     .mv-report-review-row,
-    .mv-report-category-row {
+    .mv-report-category-row,
+    .mv-shared-expense-row,
+    .mv-bill-row {
         grid-template-columns: 1fr;
         gap: 10px;
     }
 
+    .mv-shared-expense-summary {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        padding: 16px;
+    }
+
+    .mv-shared-expense-summary-item {
+        min-height: auto;
+        padding: 16px;
+        border-right: 0;
+        border-bottom: 1px solid rgba(148,163,184,0.14);
+        border-radius: 14px;
+        background: rgba(15,23,42,0.46);
+    }
+
+    .mv-shared-expense-summary-item:last-child {
+        border-bottom: 0;
+    }
+
+    .mv-shared-expense-summary-icon {
+        width: 52px;
+        height: 52px;
+        font-size: 29px;
+    }
+
+    .mv-shared-expense-row,
+    .mv-bill-row {
+        min-height: auto;
+        padding: 16px;
+        border-radius: 14px;
+        border: 1px solid rgba(148,163,184,0.12);
+        background: rgba(15,23,42,0.35);
+    }
+
+    .mv-shared-expense-list,
+    .mv-bill-table-panel {
+        display: grid;
+        gap: 12px;
+        padding: 12px;
+        overflow: visible;
+    }
+
+    .mv-shared-expense-paidby,
+    .mv-shared-expense-split,
+    .mv-shared-expense-share,
+    .mv-transfer-date,
+    .mv-transfer-account,
+    .mv-transfer-amount,
+    .mv-transfer-note,
+    .mv-wishlist-item-cell,
+    .mv-wishlist-money,
+    .mv-settings-vault-name,
+    .mv-settings-type,
+    .mv-settings-admin {
+        width: 100%;
+        min-width: 0;
+    }
+
     .mv-wishlist-row {
-        padding: 14px 0;
+        padding: 16px;
+        border: 1px solid rgba(148,163,184,0.12);
+        border-radius: 16px;
+        background: rgba(15,23,42,0.36);
     }
 
     .mv-wishlist-money {
@@ -5195,6 +5368,15 @@ div[data-testid="stPopover"] button {
     .mv-transfer-amount,
     .mv-transfer-account {
         overflow-wrap: anywhere;
+    }
+
+    .mv-transfer-row-arrow {
+        justify-content: flex-start;
+        transform: rotate(90deg);
+    }
+
+    .mv-transfer-row-divider {
+        margin: 12px 0 18px;
     }
 
     .mv-report-review-row strong,
@@ -5240,6 +5422,21 @@ div[data-testid="stPopover"] button {
     div[data-testid="stHorizontalBlock"]:has(.mv-account-avatar),
     div[data-testid="stHorizontalBlock"]:has(.mv-category-avatar) {
         padding: 16px;
+    }
+
+    div[data-testid="stHorizontalBlock"]:has(.mv-transfer-date),
+    div[data-testid="stHorizontalBlock"]:has(.mv-settings-vault-name),
+    div[data-testid="stHorizontalBlock"]:has(.mv-wishlist-row) {
+        padding: 14px;
+        border: 1px solid rgba(148,163,184,0.12);
+        border-radius: 16px;
+        background: rgba(15,23,42,0.28);
+    }
+
+    div[data-testid="stHorizontalBlock"]:has(.mv-transfer-date) > div[data-testid="column"],
+    div[data-testid="stHorizontalBlock"]:has(.mv-settings-vault-name) > div[data-testid="column"],
+    div[data-testid="stHorizontalBlock"]:has(.mv-wishlist-row) > div[data-testid="column"] {
+        padding: 0 !important;
     }
 
     .mv-category-pill-wrapper {

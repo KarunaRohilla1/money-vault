@@ -3,7 +3,11 @@ from datetime import date, timedelta
 
 from db.cache import cache_data, clear_data_cache
 from db.core import EXPENSE, get_connection
-from db.financial_cycles import close_active_cycle, get_current_cycle, get_cycle_for_date
+from db.financial_cycles import (
+    get_current_cycle,
+    get_cycle_context_with_cursor,
+    get_cycle_for_date
+)
 from db.transaction_shares import (
     ALLOCATION_FIXED,
     replace_transaction_shares_with_cursor
@@ -221,28 +225,12 @@ def calculate_bill_shares(amount, ratios):
 
 
 def get_or_create_cycle_with_cursor(cursor, shared_vault_id, year, month):
-    existing = cursor.execute(
-        """
-        SELECT
-            id,
-            shared_vault_id,
-            month,
-            year,
-            status,
-            total_amount,
-            paid_amount,
-            remaining_amount
-        FROM shared_bill_cycles
-        WHERE shared_vault_id = ?
-        AND month = ?
-        AND year = ?
-        """,
-        (
-            shared_vault_id,
-            month,
-            year
-        )
-    ).fetchone()
+    existing = get_existing_cycle_with_cursor(
+        cursor,
+        shared_vault_id,
+        year,
+        month
+    )
 
     if existing:
         cycle_id = existing[0]
@@ -275,6 +263,31 @@ def get_or_create_cycle_with_cursor(cursor, shared_vault_id, year, month):
         month
     )
     return cycle_id
+
+
+def get_existing_cycle_with_cursor(cursor, shared_vault_id, year, month):
+    return cursor.execute(
+        """
+        SELECT
+            id,
+            shared_vault_id,
+            month,
+            year,
+            status,
+            total_amount,
+            paid_amount,
+            remaining_amount
+        FROM shared_bill_cycles
+        WHERE shared_vault_id = ?
+        AND month = ?
+        AND year = ?
+        """,
+        (
+            shared_vault_id,
+            month,
+            year
+        )
+    ).fetchone()
 
 
 def generate_bill_instances_with_cursor(cursor, cycle_id, shared_vault_id, year, month):
@@ -358,6 +371,8 @@ def generate_bill_instances_with_cursor(cursor, cycle_id, shared_vault_id, year,
                 bill["frequency"],
                 bill["category_id"]
             )
+            ,
+            capture_lastrowid=False
         )
         instance = cursor.execute(
             """
@@ -398,6 +413,8 @@ def generate_bill_instances_with_cursor(cursor, cycle_id, shared_vault_id, year,
                     share["expected_amount"],
                     share["expected_percentage"]
                 )
+                ,
+                capture_lastrowid=False
             )
 
 
@@ -409,17 +426,58 @@ def get_selected_cycle(shared_vault_id, year=None, month=None):
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cycle_id = get_or_create_cycle_with_cursor(
+        cycle = get_existing_cycle_with_cursor(
             cursor,
             shared_vault_id,
             year,
             month
         )
-        conn.commit()
-        return cycle_id
+        return cycle[0] if cycle else None
 
     finally:
         conn.close()
+
+
+def initialize_shared_bill_cycles():
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        shared_vaults = cursor.execute(
+            """
+            SELECT id
+            FROM vaults
+            WHERE vault_type = 'Shared'
+            """
+        ).fetchall()
+
+        for row in shared_vaults:
+            financial_cycle = get_current_cycle(
+                row[0]
+            )
+            get_or_create_cycle_with_cursor(
+                cursor,
+                row[0],
+                financial_cycle.start_year,
+                financial_cycle.start_month
+            )
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_current_shared_bill_cycle_with_cursor(cursor, shared_vault_id):
+    financial_cycle = get_cycle_context_with_cursor(
+        cursor,
+        shared_vault_id,
+        date.today()
+    )
+    return get_or_create_cycle_with_cursor(
+        cursor,
+        shared_vault_id,
+        financial_cycle.start_year,
+        financial_cycle.start_month
+    )
 
 
 def get_shared_bills_page_data(shared_vault_id, year=None, month=None):
@@ -438,76 +496,65 @@ def get_shared_bills_page_data(shared_vault_id, year=None, month=None):
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cycle_id = get_or_create_cycle_with_cursor(
+        cycle = get_existing_cycle_with_cursor(
             cursor,
             shared_vault_id,
             year,
             month
         )
-        cycle = cursor.execute(
-            """
-            SELECT
-                id,
-                shared_vault_id,
-                month,
-                year,
-                status,
-                total_amount,
-                paid_amount,
-                remaining_amount
-            FROM shared_bill_cycles
-            WHERE id = ?
-            """,
-            (cycle_id,)
-        ).fetchone()
-        instances = cursor.execute(
-            """
-            SELECT
-                i.id,
-                i.bill_id,
-                i.name,
-                i.amount,
-                i.due_date,
-                i.frequency,
-                i.category_id,
-                i.status,
-                i.payer_vault_id,
-                COALESCE(payer.name, ''),
-                i.payment_date,
-                COALESCE(i.payment_notes, ''),
-                i.transaction_id,
-                COALESCE(c.emoji, 'calendar_month'),
-                COALESCE(c.name, '')
-            FROM shared_bill_instances i
-            LEFT JOIN vaults payer
-                ON i.payer_vault_id = payer.id
-            LEFT JOIN categories c
-                ON i.category_id = c.id
-            WHERE i.cycle_id = ?
-            ORDER BY i.due_date, i.name
-            """,
-            (cycle_id,)
-        ).fetchall()
-        share_rows = cursor.execute(
-            """
-            SELECT
-                s.bill_instance_id,
-                s.participant_vault_id,
-                v.name,
-                s.expected_amount,
-                s.expected_percentage
-            FROM shared_bill_instance_shares s
-            JOIN vaults v
-                ON s.participant_vault_id = v.id
-            WHERE s.bill_instance_id IN (
-                SELECT id
-                FROM shared_bill_instances
-                WHERE cycle_id = ?
-            )
-            ORDER BY v.name
-            """,
-            (cycle_id,)
-        ).fetchall()
+        if cycle:
+            cycle_id = cycle[0]
+            instances = cursor.execute(
+                """
+                SELECT
+                    i.id,
+                    i.bill_id,
+                    i.name,
+                    i.amount,
+                    i.due_date,
+                    i.frequency,
+                    i.category_id,
+                    i.status,
+                    i.payer_vault_id,
+                    COALESCE(payer.name, ''),
+                    i.payment_date,
+                    COALESCE(i.payment_notes, ''),
+                    i.transaction_id,
+                    COALESCE(c.emoji, 'calendar_month'),
+                    COALESCE(c.name, '')
+                FROM shared_bill_instances i
+                LEFT JOIN vaults payer
+                    ON i.payer_vault_id = payer.id
+                LEFT JOIN categories c
+                    ON i.category_id = c.id
+                WHERE i.cycle_id = ?
+                ORDER BY i.due_date, i.name
+                """,
+                (cycle_id,)
+            ).fetchall()
+            share_rows = cursor.execute(
+                """
+                SELECT
+                    s.bill_instance_id,
+                    s.participant_vault_id,
+                    v.name,
+                    s.expected_amount,
+                    s.expected_percentage
+                FROM shared_bill_instance_shares s
+                JOIN vaults v
+                    ON s.participant_vault_id = v.id
+                WHERE s.bill_instance_id IN (
+                    SELECT id
+                    FROM shared_bill_instances
+                    WHERE cycle_id = ?
+                )
+                ORDER BY v.name
+                """,
+                (cycle_id,)
+            ).fetchall()
+        else:
+            instances = []
+            share_rows = []
         participants = get_income_ratios_with_cursor(
             cursor,
             shared_vault_id
@@ -611,20 +658,19 @@ def get_shared_bills_page_data(shared_vault_id, year=None, month=None):
         balance = calculate_cycle_balance(
             list(participant_summary.values())
         )
-        conn.commit()
 
         return {
             "cycle": {
-                "id": cycle[0],
-                "shared_vault_id": cycle[1],
-                "month": cycle[2],
-                "year": cycle[3],
+                "id": cycle[0] if cycle else None,
+                "shared_vault_id": cycle[1] if cycle else shared_vault_id,
+                "month": cycle[2] if cycle else month,
+                "year": cycle[3] if cycle else year,
                 "start_date": financial_cycle.start_iso,
                 "end_date": financial_cycle.end_iso,
                 "display_name": financial_cycle.display_name,
-                "status": cycle[4],
+                "status": cycle[4] if cycle else CYCLE_ACTIVE,
                 "is_closed": (
-                    cycle[4] == CYCLE_CLOSED
+                    (cycle[4] if cycle else CYCLE_ACTIVE) == CYCLE_CLOSED
                     or financial_cycle.is_closed
                 )
             },
@@ -830,10 +876,22 @@ def add_shared_bill(
                 1 if is_active else 0
             )
         )
+        bill_id = cursor.lastrowid
+        ensure_current_shared_bill_cycle_with_cursor(
+            cursor,
+            shared_vault_id
+        )
         conn.commit()
-        close_active_cycle(cycle[0])
-        clear_data_cache()
-        return cursor.lastrowid
+        clear_data_cache((
+            "shared_bills",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts",
+            "shared_expenses",
+            "transaction_shares"
+        ))
+        return bill_id
 
     finally:
         conn.close()
@@ -862,6 +920,16 @@ def update_shared_bill(
     conn = get_connection()
     try:
         cursor = conn.cursor()
+        bill = cursor.execute(
+            """
+            SELECT shared_vault_id
+            FROM shared_bills
+            WHERE id = ?
+            """,
+            (bill_id,)
+        ).fetchone()
+        if not bill:
+            raise ValueError("Bill not found.")
         cursor.execute(
             """
             UPDATE shared_bills
@@ -890,8 +958,20 @@ def update_shared_bill(
                 bill_id
             )
         )
+        ensure_current_shared_bill_cycle_with_cursor(
+            cursor,
+            bill[0]
+        )
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "shared_bills",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts",
+            "shared_expenses",
+            "transaction_shares"
+        ))
         return True
 
     finally:
@@ -928,7 +1008,15 @@ def cancel_shared_bill(bill_id):
             )
         )
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "shared_bills",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts",
+            "shared_expenses",
+            "transaction_shares"
+        ))
         return True
 
     finally:
@@ -989,9 +1077,22 @@ def duplicate_shared_bill(bill_id):
                 bill[9]
             )
         )
+        new_bill_id = cursor.lastrowid
+        ensure_current_shared_bill_cycle_with_cursor(
+            cursor,
+            bill[0]
+        )
         conn.commit()
-        clear_data_cache()
-        return cursor.lastrowid
+        clear_data_cache((
+            "shared_bills",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts",
+            "shared_expenses",
+            "transaction_shares"
+        ))
+        return new_bill_id
 
     finally:
         conn.close()
@@ -1015,7 +1116,15 @@ def skip_bill_instance(instance_id):
             )
         )
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "shared_bills",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts",
+            "shared_expenses",
+            "transaction_shares"
+        ))
 
     finally:
         conn.close()
@@ -1144,7 +1253,15 @@ def mark_bill_paid(instance_id, payer_vault_id, payment_date, notes=""):
             )
         )
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "shared_bills",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts",
+            "shared_expenses",
+            "transaction_shares"
+        ))
         return transaction_id
 
     finally:
@@ -1219,7 +1336,16 @@ def close_cycle(cycle_id):
             next_cycle_month
         )
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "shared_bills",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts",
+            "shared_expenses",
+            "transaction_shares",
+            "cycles"
+        ))
 
     finally:
         conn.close()

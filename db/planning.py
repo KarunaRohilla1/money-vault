@@ -60,10 +60,18 @@ def add_commitment(
                 due_day,
                 account_id
             )
+            ,
+            capture_lastrowid=False
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "planning",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts"
+        ))
 
     finally:
         conn.close()
@@ -140,7 +148,13 @@ def delete_commitment(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "planning",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts"
+        ))
 
 
     finally:
@@ -192,7 +206,13 @@ def update_commitment(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "planning",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts"
+        ))
 
     finally:
         conn.close()
@@ -384,6 +404,8 @@ def save_obligation_status_with_cursor(
                 notes,
                 transaction_id
             )
+            ,
+            capture_lastrowid=False
         )
 
 
@@ -410,7 +432,13 @@ def save_obligation_status(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "planning",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts"
+        ))
 
     except Exception:
 
@@ -654,7 +682,8 @@ def save_income_status_with_cursor(
                 status,
                 notes,
                 transaction_id
-            )
+            ),
+            capture_lastrowid=False
         )
 
 
@@ -682,7 +711,13 @@ def save_income_status(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "planning",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts"
+        ))
 
     except Exception:
 
@@ -1023,6 +1058,8 @@ def carry_forward_commitment_with_cursor(
                 next_amount,
                 notes
             )
+            ,
+            capture_lastrowid=False
         )
 
 
@@ -1122,6 +1159,8 @@ def carry_forward_income_with_cursor(
                 next_amount,
                 notes
             )
+            ,
+            capture_lastrowid=False
         )
 
 
@@ -1240,6 +1279,8 @@ def finalize_month(
                 next_month,
                 next_year
             )
+            ,
+            capture_lastrowid=False
         )
 
         cursor.execute(
@@ -1258,7 +1299,14 @@ def finalize_month(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "planning",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts",
+            "cycles"
+        ))
 
     except Exception:
 
@@ -1301,10 +1349,18 @@ def add_income_template(
                 due_day,
                 account_id
             )
+            ,
+            capture_lastrowid=False
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "planning",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts"
+        ))
 
     finally:
         conn.close()
@@ -1374,7 +1430,13 @@ def update_income_template(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "planning",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts"
+        ))
 
 
     finally:
@@ -1417,7 +1479,13 @@ def delete_income_template(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "planning",
+            "dashboard",
+            "reports",
+            "transactions",
+            "accounts"
+        ))
 
     finally:
         conn.close()

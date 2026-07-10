@@ -84,7 +84,7 @@ def migrate_database():
         FROM wishlist_items
         WHERE TRIM(COALESCE(category, '')) != ''
         ON CONFLICT (vault_id, name) DO NOTHING
-        """)
+        """, capture_lastrowid=False)
 
         cursor.execute(
             """
@@ -105,6 +105,26 @@ def migrate_database():
 
     finally:
         conn.close()
+
+
+def setup_application_data():
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ensure_default_categories_with_cursor(
+            cursor
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    from db.financial_cycles import initialize_financial_cycles
+    from db.shared_bills import initialize_shared_bill_cycles
+
+    initialize_financial_cycles()
+    initialize_shared_bill_cycles()
+
+
 def backfill_transfer_groups_with_cursor(
     cursor
 ):

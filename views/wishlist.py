@@ -1,6 +1,10 @@
+from html import escape
+
 import pandas as pd
 import streamlit as st
 
+from components.money import format_money
+from components.responsive import mobile_label
 from db.wishlist import (
     add_wishlist_category,
     add_wishlist_item,
@@ -18,10 +22,6 @@ from db.wishlist import (
 
 
 DEFAULT_CATEGORY = "General"
-
-
-def format_money(amount):
-    return f"\u20b9{amount:,.0f}"
 
 
 def item_image(image_url, name):
@@ -474,6 +474,15 @@ def render_wishlist_table(items):
         category = item[2]
         cost = item[3]
         image_url = item[8]
+        notes = (item[9] or "").strip()
+
+        notes_html = ""
+        if notes:
+            notes_html = (
+                f'<div class="mv-wishlist-item-notes">'
+                f'{escape(notes).replace(chr(10), "<br>")}'
+                f'</div>'
+            )
 
         row_col, edit_col, delete_col = st.columns(
             [7.7, 0.55, 0.55],
@@ -484,14 +493,15 @@ def render_wishlist_table(items):
             st.markdown(
                 f"""
                 <div class="mv-wishlist-row">
-                    <div class="mv-wishlist-item-cell">
+                    <div class="mv-wishlist-item-cell mv-mobile-labeled" {mobile_label("Item")}>
                         {item_image(image_url, name)}
                         <div>
                             <div class="mv-wishlist-item-name">{name}</div>
                             <div class="mv-wishlist-item-category">{category}</div>
+                            {notes_html}
                         </div>
                     </div>
-                    <div class="mv-wishlist-money">{format_money(cost)}</div>
+                    <div class="mv-wishlist-money mv-mobile-labeled" {mobile_label("Cost")}>{format_money(cost)}</div>
                 </div>
                 """,
                 unsafe_allow_html=True

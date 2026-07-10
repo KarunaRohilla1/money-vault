@@ -15,6 +15,7 @@ from db.transaction_shares import (
 )
 from db.transactions import (
     add_transaction,
+    delete_transaction,
     get_transaction_by_id,
     update_transaction
 )
@@ -131,7 +132,9 @@ def transaction_form(
     allow_add_another=False,
     transaction_id=None,
     forced_beneficiary_vault_id=None,
-    dialog_state_key="show_transaction_dialog"
+    dialog_state_key="show_transaction_dialog",
+    allow_delete=False,
+    edit_session_key=None
 ):
 
     reset_token_key = f"{form_key}_reset_token"
@@ -496,6 +499,7 @@ def transaction_form(
     save_clicked = False
     save_another_clicked = False
     cancel_clicked = False
+    delete_clicked = False
 
     if allow_add_another:
         col1, col2, col3 = st.columns(3)
@@ -512,6 +516,30 @@ def transaction_form(
                 "Save Another",
                 use_container_width=True,
                 key=f"{form_key}_save_another"
+            )
+
+        with col3:
+            cancel_clicked = st.button(
+                "Cancel",
+                use_container_width=True,
+                key=f"{form_key}_cancel"
+            )
+
+    elif transaction_id and allow_delete:
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            save_clicked = st.button(
+                "Save",
+                use_container_width=True,
+                key=f"{form_key}_save"
+            )
+
+        with col2:
+            delete_clicked = st.button(
+                "Delete",
+                use_container_width=True,
+                key=f"{form_key}_delete"
             )
 
         with col3:
@@ -541,9 +569,20 @@ def transaction_form(
     if cancel_clicked:
         if transaction_id:
             st.session_state.edit_transaction_id = None
+            if edit_session_key:
+                st.session_state[edit_session_key] = None
         else:
             st.session_state[dialog_state_key] = False
 
+        st.rerun()
+
+    if delete_clicked and transaction_id:
+        delete_transaction(
+            transaction_id
+        )
+        st.session_state.edit_transaction_id = None
+        if edit_session_key:
+            st.session_state[edit_session_key] = None
         st.rerun()
 
     if save_clicked or save_another_clicked:
@@ -581,6 +620,8 @@ def transaction_form(
                     amount_allocations=amount_allocations
                 )
                 st.session_state.edit_transaction_id = None
+                if edit_session_key:
+                    st.session_state[edit_session_key] = None
                 st.rerun()
 
             else:

@@ -131,7 +131,18 @@ def create_vault(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "vaults",
+            "accounts",
+            "categories",
+            "cycles",
+            "dashboard",
+            "planning",
+            "reports",
+            "shared_expenses",
+            "shared_bills",
+            "wishlist"
+        ))
 
 
     finally:
@@ -252,7 +263,18 @@ def update_vault(
             )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "vaults",
+            "accounts",
+            "categories",
+            "cycles",
+            "dashboard",
+            "planning",
+            "reports",
+            "shared_expenses",
+            "shared_bills",
+            "wishlist"
+        ))
 
 
     finally:
@@ -283,6 +305,8 @@ def update_vault_shares_with_cursor(cursor, vault_id, shared_vault_ids):
                 vault_id,
                 int(shared_vault_id)
             )
+            ,
+            capture_lastrowid=False
         )
 
 @cache_data(ttl=60)
@@ -449,7 +473,11 @@ def promote_to_admin(vault_name):
         affected_rows = conn.total_changes
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "vaults",
+            "dashboard",
+            "reports"
+        ))
 
         return affected_rows
 
@@ -471,7 +499,11 @@ def demote_admin(vault_name):
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "vaults",
+            "dashboard",
+            "reports"
+        ))
 
     finally:
         conn.close()
@@ -709,7 +741,18 @@ def delete_vault(vault_id):
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "vaults",
+            "accounts",
+            "categories",
+            "cycles",
+            "dashboard",
+            "planning",
+            "reports",
+            "shared_expenses",
+            "shared_bills",
+            "wishlist"
+        ))
 
     finally:
         conn.close()

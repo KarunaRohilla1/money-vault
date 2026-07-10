@@ -271,6 +271,8 @@ def replace_transaction_shares_with_cursor(cursor, transaction_id, shares):
                 share["share_amount"],
                 share.get("share_percentage")
             )
+            ,
+            capture_lastrowid=False
         )
 
 

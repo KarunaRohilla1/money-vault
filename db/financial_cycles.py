@@ -367,6 +367,8 @@ def get_or_create_cycle_with_cursor(cursor, vault_id, target_date=None):
             start.isoformat(),
             end.isoformat(),
         )
+        ,
+        capture_lastrowid=False
     )
     row = cursor.execute(
         """
@@ -389,6 +391,75 @@ def get_or_create_cycle_with_cursor(cursor, vault_id, target_date=None):
     return context
 
 
+def get_cycle_context_with_cursor(cursor, vault_id, target_date=None):
+    target_date = parse_date(target_date or date.today())
+    start_day, vault_created_at = get_vault_cycle_settings_with_cursor(
+        cursor,
+        vault_id
+    )
+    start, end = cycle_bounds_for(
+        target_date,
+        start_day,
+        vault_created_at
+    )
+    existing = cursor.execute(
+        """
+        SELECT id, vault_id, start_date, end_date, created_at, closed_at
+        FROM financial_cycles
+        WHERE vault_id = ?
+        AND start_date = ?
+        """,
+        (
+            vault_id,
+            start.isoformat()
+        )
+    ).fetchone()
+
+    if existing:
+        return CycleContext(
+            id=existing[0],
+            vault_id=existing[1],
+            start_date=start,
+            end_date=end,
+            status=derive_cycle_status(start, end),
+            closed_at=existing[5] if len(existing) > 5 else None
+        )
+
+    return build_cycle_context(
+        vault_id,
+        start,
+        end
+    )
+
+
+def initialize_financial_cycles():
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        vaults = cursor.execute(
+            """
+            SELECT id, COALESCE(created_at::date, CURRENT_DATE)
+            FROM vaults
+            """
+        ).fetchall()
+
+        for vault_id, vault_created_at in vaults:
+            repair_financial_cycles_with_cursor(
+                cursor,
+                vault_id,
+                parse_date(vault_created_at)
+            )
+            get_or_create_cycle_with_cursor(
+                cursor,
+                vault_id,
+                date.today()
+            )
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
 @cache_data(ttl=60)
 def get_current_cycle(vault_id):
     return get_cycle_for_date(
@@ -403,16 +474,11 @@ def get_cycle_for_date(vault_id, target_iso):
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        context = get_or_create_cycle_with_cursor(
+        return get_cycle_context_with_cursor(
             cursor,
             vault_id,
             target_date
         )
-        conn.commit()
-        return context
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()
 
@@ -441,7 +507,7 @@ def list_cycles(vault_id, limit=60):
             cursor,
             vault_id
         )
-        current = get_or_create_cycle_with_cursor(
+        current = get_cycle_context_with_cursor(
             cursor,
             vault_id,
             date.today()
@@ -495,11 +561,7 @@ def list_cycles(vault_id, limit=60):
                     build_cycle_context(vault_id, cycle_start, cycle_end)
                 )
             )
-        conn.commit()
         return contexts
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()
 
@@ -546,8 +608,14 @@ def close_active_cycle(vault_id):
             (active.id,)
         )
         conn.commit()
-        clear_data_cache()
-        return get_or_create_cycle_with_cursor(
+        clear_data_cache((
+            "cycles",
+            "planning",
+            "dashboard",
+            "reports",
+            "shared_bills"
+        ))
+        return get_cycle_context_with_cursor(
             cursor,
             vault_id,
             date.today()

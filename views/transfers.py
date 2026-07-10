@@ -3,6 +3,8 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from components.money import format_money
+from components.responsive import mobile_label
 from db.accounts import (
     get_account_balances,
     get_accounts
@@ -18,11 +20,6 @@ from db.financial_cycles import get_current_cycle
 
 
 INITIAL_TRANSFER_LIMIT = 5
-
-
-def format_money(amount):
-
-    return f"₹{amount:,.0f}"
 
 
 def account_badge(name):
@@ -574,14 +571,14 @@ def render_transfer_table(
 
         with row[0]:
             st.markdown(
-                f'<div class="mv-transfer-date">{transfer_date}</div>',
+                f'<div class="mv-transfer-date mv-mobile-labeled" {mobile_label("Date")}>{transfer_date}</div>',
                 unsafe_allow_html=True
             )
 
         with row[1]:
             st.markdown(
                 f"""
-                <div class="mv-transfer-account">
+                <div class="mv-transfer-account mv-mobile-labeled" {mobile_label("From")}>
                     <span class="mv-transfer-mini-badge">{account_badge(from_name)}</span>
                     <span>{from_name}</span>
                 </div>
@@ -598,7 +595,7 @@ def render_transfer_table(
         with row[3]:
             st.markdown(
                 f"""
-                <div class="mv-transfer-account">
+                <div class="mv-transfer-account mv-mobile-labeled" {mobile_label("To")}>
                     <span class="mv-transfer-mini-badge">{account_badge(to_name)}</span>
                     <span>{to_name}</span>
                 </div>
@@ -608,13 +605,13 @@ def render_transfer_table(
 
         with row[4]:
             st.markdown(
-                f'<div class="mv-transfer-amount">{format_money(amount)}</div>',
+                f'<div class="mv-transfer-amount mv-mobile-labeled" {mobile_label("Amount")}>{format_money(amount)}</div>',
                 unsafe_allow_html=True
             )
 
         with row[5]:
             st.markdown(
-                f'<div class="mv-transfer-note">{note}</div>',
+                f'<div class="mv-transfer-note mv-mobile-labeled" {mobile_label("Note")}>{note}</div>',
                 unsafe_allow_html=True
             )
 

@@ -164,7 +164,17 @@ def add_transaction(
             )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "transactions",
+            "transaction_shares",
+            "accounts",
+            "dashboard",
+            "reports",
+            "planning",
+            "shared_expenses",
+            "shared_bills",
+            "transfers"
+        ))
 
         return transaction_id
 
@@ -405,7 +415,17 @@ def delete_transaction(transaction_id):
             )
 
             conn.commit()
-            clear_data_cache()
+            clear_data_cache((
+                "transactions",
+                "transaction_shares",
+                "accounts",
+                "dashboard",
+                "reports",
+                "planning",
+                "shared_expenses",
+                "shared_bills",
+                "transfers"
+            ))
 
             return
 
@@ -442,7 +462,17 @@ def delete_transaction(transaction_id):
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "transactions",
+            "transaction_shares",
+            "accounts",
+            "dashboard",
+            "reports",
+            "planning",
+            "shared_expenses",
+            "shared_bills",
+            "transfers"
+        ))
 
     finally:
         conn.close()
@@ -609,7 +639,17 @@ def update_transaction(
                 )
 
             conn.commit()
-            clear_data_cache()
+            clear_data_cache((
+                "transactions",
+                "transaction_shares",
+                "accounts",
+                "dashboard",
+                "reports",
+                "planning",
+                "shared_expenses",
+                "shared_bills",
+                "transfers"
+            ))
             return
 
         if transaction_type:
@@ -618,6 +658,7 @@ def update_transaction(
                 """
                 UPDATE transactions
                 SET
+                    vault_id = ?,
                     account_id = ?,
                     category_id = ?,
                     date = ?,
@@ -629,6 +670,7 @@ def update_transaction(
                 WHERE id = ?
                 """,
                 (
+                    origin_vault_id,
                     account_id,
                     category_id,
                     date,
@@ -647,6 +689,7 @@ def update_transaction(
                 """
                 UPDATE transactions
                 SET
+                    vault_id = ?,
                     account_id = ?,
                     category_id = ?,
                     date = ?,
@@ -657,6 +700,7 @@ def update_transaction(
                 WHERE id = ?
                 """,
                 (
+                    origin_vault_id,
                     account_id,
                     category_id,
                     date,
@@ -675,7 +719,17 @@ def update_transaction(
         )
 
         conn.commit()
-        clear_data_cache()
+        clear_data_cache((
+            "transactions",
+            "transaction_shares",
+            "accounts",
+            "dashboard",
+            "reports",
+            "planning",
+            "shared_expenses",
+            "shared_bills",
+            "transfers"
+        ))
 
     finally:
         conn.close()
