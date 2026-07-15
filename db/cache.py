@@ -61,7 +61,7 @@ def infer_domains(func):
 def get_cache_versions(domains):
     normalized = normalize_domains(domains)
 
-    if st is None:
+    if st is None or not hasattr(st, "session_state"):
         return tuple(
             (domain, 0)
             for domain in normalized
@@ -108,7 +108,8 @@ def cache_data(func=None, domains=None, **kwargs):
                 **call_kwargs
             )
 
-        wrapper.clear = cached_call.clear
+        if hasattr(cached_call, "clear"):
+            wrapper.clear = cached_call.clear
         return wrapper
 
     if func is None:

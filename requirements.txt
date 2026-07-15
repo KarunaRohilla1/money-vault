@@ -5,3 +5,7 @@ plotly
 python-dateutil
 psycopg2-binary
 supabase
+fastapi
+uvicorn
+PyJWT
+pytest

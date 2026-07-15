@@ -13,12 +13,22 @@ except ImportError:
 
 from db.cache import cache_resource
 
+try:
+    from api.env import load_local_env
+except ImportError:
+    load_local_env = None
+
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "supabase" / "schema.sql"
 
 IntegrityError = psycopg2.IntegrityError if psycopg2 else Exception
+OperationalError = psycopg2.OperationalError if psycopg2 else Exception
+InterfaceError = psycopg2.InterfaceError if psycopg2 else Exception
 
 
 def get_database_url():
+    if load_local_env:
+        load_local_env()
+
     for key in (
         "SUPABASE_DB_URL",
         "DATABASE_URL"
@@ -88,9 +98,75 @@ def get_supabase_client():
 def connect():
     pool = get_connection_pool()
     return PostgresConnection(
-        pool.getconn(),
+        get_healthy_pool_connection(pool),
         pool
     )
+
+
+def is_stale_connection_error(error):
+    return isinstance(
+        error,
+        (
+            OperationalError,
+            InterfaceError
+        )
+    )
+
+
+def is_raw_connection_open(raw_connection):
+    return (
+        raw_connection is not None
+        and getattr(raw_connection, "closed", 1) == 0
+    )
+
+
+def is_raw_connection_usable(raw_connection):
+    if not is_raw_connection_open(raw_connection):
+        return False
+
+    try:
+        with raw_connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        raw_connection.rollback()
+        return True
+    except Exception:
+        try:
+            raw_connection.rollback()
+        except Exception:
+            pass
+        return False
+
+
+def get_healthy_pool_connection(pool):
+    for _attempt in range(2):
+        raw_connection = pool.getconn()
+
+        if is_raw_connection_usable(raw_connection):
+            return raw_connection
+
+        discard_pool_connection(
+            pool,
+            raw_connection
+        )
+
+    raise RuntimeError("Unable to acquire a healthy PostgreSQL connection.")
+
+
+def discard_pool_connection(pool, raw_connection):
+    if raw_connection is None:
+        return
+
+    try:
+        pool.putconn(
+            raw_connection,
+            close=True
+        )
+    except Exception:
+        try:
+            raw_connection.close()
+        except Exception:
+            pass
 
 
 @cache_resource(show_spinner=False)
@@ -188,16 +264,43 @@ def is_insert_query(sql):
     return sql.strip().upper().startswith("INSERT INTO ")
 
 
+def is_read_only_query(sql):
+    statement = sql.strip().upper()
+    return statement.startswith(
+        (
+            "SELECT ",
+            "WITH ",
+            "SHOW "
+        )
+    )
+
+
 class PostgresCursor:
-    def __init__(self, raw_cursor):
-        self.raw_cursor = raw_cursor
+    def __init__(self, connection):
+        if hasattr(
+            connection,
+            "raw_connection"
+        ):
+            self.connection = connection
+            self.raw_cursor = connection.raw_connection.cursor()
+        else:
+            self.connection = None
+            self.raw_cursor = connection
         self.lastrowid = None
+
+    @classmethod
+    def from_raw_cursor(cls, raw_cursor):
+        cursor = cls.__new__(cls)
+        cursor.connection = None
+        cursor.raw_cursor = raw_cursor
+        cursor.lastrowid = None
+        return cursor
 
     @property
     def rowcount(self):
         return self.raw_cursor.rowcount
 
-    def execute(self, sql, params=None, capture_lastrowid=True):
+    def execute(self, sql, params=None, capture_lastrowid=True, _retry_stale_read=True):
         translated = translate_sql(sql)
         params = tuple(params or ())
 
@@ -221,6 +324,27 @@ class PostgresCursor:
         except errors.DuplicateTable:
             self.raw_cursor.connection.rollback()
             return self
+        except (OperationalError, InterfaceError):
+            if (
+                self.connection is None
+                or not _retry_stale_read
+                or not is_read_only_query(translated)
+            ):
+                raise
+
+            try:
+                self.raw_cursor.close()
+            except Exception:
+                pass
+
+            self.connection.reconnect()
+            self.raw_cursor = self.connection.raw_connection.cursor()
+            return self.execute(
+                translated,
+                params,
+                capture_lastrowid=capture_lastrowid,
+                _retry_stale_read=False
+            )
 
         return self
 
@@ -285,7 +409,7 @@ class PostgresConnection:
 
     def cursor(self):
         return PostgresCursor(
-            self.raw_connection.cursor()
+            self
         )
 
     def execute(self, sql, params=None, capture_lastrowid=True):
@@ -307,15 +431,36 @@ class PostgresConnection:
             return
 
         if self.pool:
-            try:
-                self.raw_connection.rollback()
-            except Exception:
-                pass
-
-            self.pool.putconn(
-                self.raw_connection
-            )
+            if is_raw_connection_open(self.raw_connection):
+                try:
+                    self.raw_connection.rollback()
+                    self.pool.putconn(
+                        self.raw_connection
+                    )
+                except Exception:
+                    discard_pool_connection(
+                        self.pool,
+                        self.raw_connection
+                    )
+            else:
+                discard_pool_connection(
+                    self.pool,
+                    self.raw_connection
+                )
         else:
             self.raw_connection.close()
 
         self.closed = True
+
+    def reconnect(self):
+        if not self.pool:
+            raise OperationalError("Cannot reconnect without a connection pool.")
+
+        discard_pool_connection(
+            self.pool,
+            self.raw_connection
+        )
+        self.raw_connection = get_healthy_pool_connection(
+            self.pool
+        )
+        self.closed = False

@@ -1,0 +1,227 @@
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    vault_name: str = Field(alias="vaultName", min_length=1)
+    pin: str = Field(min_length=1)
+
+
+class VaultContext(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    name: str
+    is_admin: bool = Field(alias="isAdmin")
+    vault_type: str = Field(alias="vaultType")
+
+
+class LoginResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    token: str
+    vault: VaultContext
+    expires_at: Optional[str] = Field(default=None, alias="expiresAt")
+
+
+class FinancialCycleResponse(BaseModel):
+    id: int
+    start_date: str = Field(alias="startDate")
+    end_date: str = Field(alias="endDate")
+    display_name: str = Field(alias="displayName")
+    status: str
+    days_completed: int = Field(alias="daysCompleted")
+    days_remaining: int = Field(alias="daysRemaining")
+    total_days: int = Field(alias="totalDays")
+    progress_percent: int = Field(alias="progressPercent")
+
+
+class PrimaryAccountResponse(BaseModel):
+    name: str
+    balance: float
+
+
+class SettlementResponse(BaseModel):
+    label: str
+    amount: float
+    direction: str
+    receivable: float
+    payable: float
+    net: float
+    items: List[Dict[str, Any]]
+
+
+class RecentActivityItem(BaseModel):
+    id: int
+    date: str
+    account_name: Optional[str] = Field(default=None, alias="accountName")
+    category_name: str = Field(alias="categoryName")
+    amount: float
+    transaction_type: str = Field(alias="transactionType")
+    notes: Optional[str] = None
+
+
+class CategorySpendItem(BaseModel):
+    name: str
+    amount: float
+
+
+class SetupStatusResponse(BaseModel):
+    accounts: int
+    income_templates: int = Field(alias="incomeTemplates")
+    commitments: int
+    has_vault_login: bool = Field(alias="hasVaultLogin")
+    has_cycle_setting: bool = Field(alias="hasCycleSetting")
+    has_savings_goal: bool = Field(alias="hasSavingsGoal")
+    has_accounts: bool = Field(alias="hasAccounts")
+    has_income_templates: bool = Field(alias="hasIncomeTemplates")
+    has_commitments: bool = Field(alias="hasCommitments")
+    is_complete: bool = Field(alias="isComplete")
+
+
+class DashboardDataResponse(BaseModel):
+    cycle: FinancialCycleResponse
+    safe_to_spend: float = Field(alias="safeToSpend")
+    primary_account: PrimaryAccountResponse = Field(alias="primaryAccount")
+    expenses_this_cycle: float = Field(alias="expensesThisCycle")
+    remaining_commitments: float = Field(alias="remainingCommitments")
+    credit_card_due: float = Field(alias="creditCardDue")
+    settlement: SettlementResponse
+    recent_activity: List[RecentActivityItem] = Field(alias="recentActivity")
+    spending_by_category: List[CategorySpendItem] = Field(alias="spendingByCategory")
+    setup: SetupStatusResponse
+    summary: Dict[str, Any]
+
+
+class DashboardResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    generated_at: datetime = Field(alias="generatedAt")
+    vault: VaultContext
+    data: DashboardDataResponse
+
+
+class HealthResponse(BaseModel):
+    status: str
+
+
+class AccountResponse(BaseModel):
+    id: int
+    name: str
+    type: str
+    opening_balance: float = Field(alias="openingBalance")
+    is_primary: bool = Field(alias="isPrimary")
+    balance: Optional[float] = None
+
+
+class AccountCreateRequest(BaseModel):
+    name: str = Field(min_length=1)
+    type: str = Field(min_length=1)
+    opening_balance: float = Field(alias="openingBalance")
+    is_primary: bool = Field(default=False, alias="isPrimary")
+
+
+class AccountUpdateRequest(AccountCreateRequest):
+    pass
+
+
+class CategoryResponse(BaseModel):
+    id: int
+    emoji: str
+    name: str
+    category_type: str = Field(alias="categoryType")
+    parent_category: Optional[str] = Field(default=None, alias="parentCategory")
+    is_system: bool = Field(alias="isSystem")
+    transaction_count: Optional[int] = Field(default=None, alias="transactionCount")
+
+
+class CategoryCreateRequest(BaseModel):
+    name: str = Field(min_length=1)
+    emoji: str = Field(min_length=1)
+    category_type: str = Field(alias="categoryType", min_length=1)
+
+
+class CategoryUpdateRequest(CategoryCreateRequest):
+    pass
+
+
+class TransactionResponse(BaseModel):
+    id: int
+    date: str
+    account_name: Optional[str] = Field(default=None, alias="accountName")
+    category_name: str = Field(alias="categoryName")
+    amount: float
+    transaction_type: str = Field(alias="transactionType")
+    notes: Optional[str] = None
+    transfer_group_id: Optional[str] = Field(default=None, alias="transferGroupId")
+
+
+class TransactionDetailResponse(BaseModel):
+    id: int
+    account_id: int = Field(alias="accountId")
+    category_id: int = Field(alias="categoryId")
+    date: str
+    amount: float
+    transaction_type: str = Field(alias="transactionType")
+    notes: Optional[str] = None
+    beneficiary_vault_id: Optional[int] = Field(default=None, alias="beneficiaryVaultId")
+    allocation_method: Optional[str] = Field(default=None, alias="allocationMethod")
+
+
+class TransactionCreateRequest(BaseModel):
+    account_id: int = Field(alias="accountId")
+    category_id: int = Field(alias="categoryId")
+    date: str = Field(min_length=1)
+    amount: float = Field(gt=0)
+    transaction_type: str = Field(alias="transactionType", min_length=1)
+    notes: str = ""
+    beneficiary_vault_id: Optional[int] = Field(default=None, alias="beneficiaryVaultId")
+    allocation_method: Optional[str] = Field(default=None, alias="allocationMethod")
+    participant_vaults: Optional[List[int]] = Field(default=None, alias="participantVaults")
+    percentage_allocations: Optional[Dict[str, float]] = Field(default=None, alias="percentageAllocations")
+    amount_allocations: Optional[Dict[str, float]] = Field(default=None, alias="amountAllocations")
+
+
+class TransactionUpdateRequest(TransactionCreateRequest):
+    pass
+
+
+class TransferResponse(BaseModel):
+    transfer_group_id: str = Field(alias="transferGroupId")
+    date: str
+    from_account_id: int = Field(alias="fromAccountId")
+    from_account_name: str = Field(alias="fromAccountName")
+    to_account_id: int = Field(alias="toAccountId")
+    to_account_name: str = Field(alias="toAccountName")
+    amount: float
+    notes: Optional[str] = None
+
+
+class TransferDetailResponse(BaseModel):
+    transfer_group_id: str = Field(alias="transferGroupId")
+    vault_id: int = Field(alias="vaultId")
+    date: str
+    from_account_id: int = Field(alias="fromAccountId")
+    to_account_id: int = Field(alias="toAccountId")
+    amount: float
+    notes: Optional[str] = None
+
+
+class TransferCreateRequest(BaseModel):
+    from_account_id: int = Field(alias="fromAccountId")
+    to_account_id: int = Field(alias="toAccountId")
+    date: str = Field(min_length=1)
+    amount: float = Field(gt=0)
+    notes: str = ""
+
+
+class TransferUpdateRequest(TransferCreateRequest):
+    pass
+
+
+class SuccessResponse(BaseModel):
+    status: str = "ok"
