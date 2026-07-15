@@ -225,3 +225,74 @@ class TransferUpdateRequest(TransferCreateRequest):
 
 class SuccessResponse(BaseModel):
     status: str = "ok"
+
+
+class PlanningCycleResponse(BaseModel):
+    id: int
+    vault_id: int = Field(alias="vaultId")
+    start_date: str = Field(alias="startDate")
+    end_date: str = Field(alias="endDate")
+    start_month: int = Field(alias="startMonth")
+    start_year: int = Field(alias="startYear")
+    status: str
+
+
+class PlanningTotalsResponse(BaseModel):
+    income: float
+    planned_commitments: float = Field(alias="plannedCommitments")
+    remaining_commitments: float = Field(alias="remainingCommitments")
+    income_planned: float = Field(alias="incomePlanned")
+    income_received: float = Field(alias="incomeReceived")
+    commitments_planned: float = Field(alias="commitmentsPlanned")
+    commitments_completed: float = Field(alias="commitmentsCompleted")
+    expenses: float
+    savings_goal: float = Field(alias="savingsGoal")
+    projected_savings: float = Field(alias="projectedSavings")
+
+
+class PlanningStatusResponse(BaseModel):
+    actual_amount: Optional[float] = Field(default=None, alias="actualAmount")
+    status: str
+    notes: Optional[str] = None
+
+
+class CommitmentResponse(BaseModel):
+    account_id: Optional[int] = Field(default=None, alias="accountId")
+    account_name: Optional[str] = Field(default=None, alias="accountName")
+    amount: float
+    due_day: int = Field(alias="dueDay")
+    id: int
+    name: str
+    status: PlanningStatusResponse
+
+
+class IncomeTemplateResponse(BaseModel):
+    account_id: Optional[int] = Field(default=None, alias="accountId")
+    account_name: Optional[str] = Field(default=None, alias="accountName")
+    amount: float
+    due_day: int = Field(alias="dueDay")
+    id: int
+    name: str
+    status: PlanningStatusResponse
+
+
+class PlanningResponse(BaseModel):
+    cycle: PlanningCycleResponse
+    totals: PlanningTotalsResponse
+    commitments: List[CommitmentResponse]
+    income_templates: List[IncomeTemplateResponse] = Field(alias="incomeTemplates")
+
+
+class PlanningItemRequest(BaseModel):
+    account_id: int = Field(alias="accountId")
+    amount: float = Field(gt=0)
+    due_day: int = Field(alias="dueDay", ge=1, le=31)
+    name: str = Field(min_length=1)
+
+
+class PlanningStatusRequest(BaseModel):
+    actual_amount: Optional[float] = Field(default=None, alias="actualAmount")
+    month: int = Field(ge=1, le=12)
+    notes: str = ""
+    status: str = Field(min_length=1)
+    year: int = Field(ge=2000, le=2100)

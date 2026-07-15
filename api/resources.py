@@ -121,6 +121,48 @@ def transfer_belongs_to_vault(transfer_group_id, vault_id):
         conn.close()
 
 
+def commitment_belongs_to_vault(commitment_id, vault_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM commitments
+            WHERE id = ?
+            AND vault_id = ?
+            AND is_active = 1
+            """,
+            (
+                commitment_id,
+                vault_id
+            )
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def income_template_belongs_to_vault(template_id, vault_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM income_templates
+            WHERE id = ?
+            AND vault_id = ?
+            AND is_active = 1
+            """,
+            (
+                template_id,
+                vault_id
+            )
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def require_account(account_id, vault_id):
     if not account_belongs_to_vault(
         account_id,
@@ -148,6 +190,22 @@ def require_transaction(transaction_id, vault_id):
 def require_transfer(transfer_group_id, vault_id):
     if not transfer_belongs_to_vault(
         transfer_group_id,
+        vault_id
+    ):
+        raise not_found()
+
+
+def require_commitment(commitment_id, vault_id):
+    if not commitment_belongs_to_vault(
+        commitment_id,
+        vault_id
+    ):
+        raise not_found()
+
+
+def require_income_template(template_id, vault_id):
+    if not income_template_belongs_to_vault(
+        template_id,
         vault_id
     ):
         raise not_found()

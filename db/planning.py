@@ -169,22 +169,37 @@ def update_commitment(
 
     conn = get_connection()
     try:
+        commitment = conn.execute(
+            """
+            SELECT vault_id
+            FROM commitments
+            WHERE id = ?
+            """,
+            (commitment_id,)
+        ).fetchone()
+
+        if not commitment:
+            raise ValueError("Commitment not found.")
+
+        vault_id = commitment[0]
         existing = conn.execute(
             """
             SELECT id
-            FROM income_templates
+            FROM commitments
             WHERE vault_id = ?
             AND LOWER(name) = LOWER(?)
             AND is_active = 1
+            AND id != ?
             """,
             (
                 vault_id,
-                name.strip()
+                name.strip(),
+                commitment_id
             )
         ).fetchone()
 
         if existing:
-            raise ValueError("A recurring income with this name already exists.")
+            raise ValueError("A recurring commitment with this name already exists.")
 
         conn.execute(
             """
