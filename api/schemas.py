@@ -296,3 +296,52 @@ class PlanningStatusRequest(BaseModel):
     notes: str = ""
     status: str = Field(min_length=1)
     year: int = Field(ge=2000, le=2100)
+
+
+class WishlistCategoryResponse(BaseModel):
+    id: int
+    vault_id: int = Field(alias="vaultId")
+    name: str
+
+
+class WishlistCategoryRequest(BaseModel):
+    fallback: str = "General"
+    name: str = Field(min_length=1)
+
+
+class WishlistItemResponse(BaseModel):
+    account_id: Optional[int] = Field(default=None, alias="accountId")
+    account_name: Optional[str] = Field(default=None, alias="accountName")
+    category: str
+    estimated_cost: float = Field(alias="estimatedCost")
+    id: int
+    image_url: str = Field(alias="imageUrl")
+    name: str
+    notes: str
+    progress_percent: int = Field(alias="progressPercent")
+    saved_amount: float = Field(alias="savedAmount")
+    target_date: Optional[str] = Field(default=None, alias="targetDate")
+
+
+class WishlistSummaryResponse(BaseModel):
+    total_items: int = Field(alias="totalItems")
+    total_cost: float = Field(alias="totalCost")
+    total_saved: float = Field(alias="totalSaved")
+    progress: int
+
+
+class WishlistResponse(BaseModel):
+    categories: List[WishlistCategoryResponse]
+    items: List[WishlistItemResponse]
+    summary: WishlistSummaryResponse
+
+
+class WishlistItemRequest(BaseModel):
+    account_id: Optional[int] = Field(default=None, alias="accountId")
+    category: str = Field(min_length=1)
+    estimated_cost: float = Field(alias="estimatedCost", gt=0)
+    image_url: str = Field(default="", alias="imageUrl")
+    name: str = Field(min_length=1)
+    notes: str = ""
+    saved_amount: float = Field(default=0, alias="savedAmount", ge=0)
+    target_date: Optional[str] = Field(default=None, alias="targetDate")

@@ -163,6 +163,48 @@ def income_template_belongs_to_vault(template_id, vault_id):
         conn.close()
 
 
+def wishlist_item_belongs_to_vault(item_id, vault_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM wishlist_items
+            WHERE id = ?
+            AND vault_id = ?
+            AND is_active = 1
+            """,
+            (
+                item_id,
+                vault_id
+            )
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def wishlist_category_belongs_to_vault(category_id, vault_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM wishlist_categories
+            WHERE id = ?
+            AND vault_id = ?
+            AND is_active = 1
+            """,
+            (
+                category_id,
+                vault_id
+            )
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def require_account(account_id, vault_id):
     if not account_belongs_to_vault(
         account_id,
@@ -206,6 +248,22 @@ def require_commitment(commitment_id, vault_id):
 def require_income_template(template_id, vault_id):
     if not income_template_belongs_to_vault(
         template_id,
+        vault_id
+    ):
+        raise not_found()
+
+
+def require_wishlist_item(item_id, vault_id):
+    if not wishlist_item_belongs_to_vault(
+        item_id,
+        vault_id
+    ):
+        raise not_found()
+
+
+def require_wishlist_category(category_id, vault_id):
+    if not wishlist_category_belongs_to_vault(
+        category_id,
         vault_id
     ):
         raise not_found()

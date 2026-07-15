@@ -11,6 +11,7 @@ from api.dashboard import router as dashboard_router
 from api.planning import router as planning_router
 from api.transactions import router as transactions_router
 from api.transfers import router as transfers_router
+from api.wishlist import router as wishlist_router
 from api.schemas import HealthResponse
 
 
@@ -51,6 +52,7 @@ def create_app():
     app.include_router(planning_router)
     app.include_router(transactions_router)
     app.include_router(transfers_router)
+    app.include_router(wishlist_router)
 
     @app.get("/health", response_model=HealthResponse)
     def health():
