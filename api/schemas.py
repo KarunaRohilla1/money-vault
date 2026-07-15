@@ -345,3 +345,11 @@ class WishlistItemRequest(BaseModel):
     notes: str = ""
     saved_amount: float = Field(default=0, alias="savedAmount", ge=0)
     target_date: Optional[str] = Field(default=None, alias="targetDate")
+
+
+class ReportsResponse(BaseModel):
+    category_breakdown: List[Dict[str, Any]] = Field(alias="categoryBreakdown")
+    generated_at: datetime = Field(alias="generatedAt")
+    monthly_trend: List[Dict[str, Any]] = Field(alias="monthlyTrend")
+    period: Dict[str, Any]
+    summary: Dict[str, Any]
