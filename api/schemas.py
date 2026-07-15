@@ -353,3 +353,17 @@ class ReportsResponse(BaseModel):
     monthly_trend: List[Dict[str, Any]] = Field(alias="monthlyTrend")
     period: Dict[str, Any]
     summary: Dict[str, Any]
+
+
+class VaultSummaryResponse(BaseModel):
+    id: int
+    is_admin: bool = Field(alias="isAdmin")
+    name: str
+    vault_type: str = Field(alias="vaultType")
+
+
+class SettingsResponse(BaseModel):
+    current_vault: VaultSummaryResponse = Field(alias="currentVault")
+    accessible_vaults: List[VaultSummaryResponse] = Field(alias="accessibleVaults")
+    cycle_start_day: int = Field(alias="cycleStartDay")
+    monthly_savings_goal: float = Field(alias="monthlySavingsGoal")
