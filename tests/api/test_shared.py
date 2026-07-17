@@ -40,6 +40,10 @@ def test_shared_expenses_wraps_legacy_page_data(monkeypatch):
         "api.shared.cycle_bounds",
         lambda shared_vault_id: ("2026-07-01", "2026-07-31")
     )
+    monkeypatch.setattr(
+        "api.shared.require_shared_participant",
+        lambda payer_vault_id, shared_vault_id: None
+    )
 
     def fake_page_data(shared_vault_id, start_date, end_date, category_id=None, paid_by_vault_id=None):
         observed.update(
