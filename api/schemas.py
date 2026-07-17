@@ -369,6 +369,14 @@ class SettingsResponse(BaseModel):
     monthly_savings_goal: float = Field(alias="monthlySavingsGoal")
 
 
+class SettingsUpdateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    vault_name: Optional[str] = Field(default=None, alias="vaultName")
+    cycle_start_day: Optional[int] = Field(default=None, alias="cycleStartDay", ge=1, le=28)
+    monthly_savings_goal: Optional[float] = Field(default=None, alias="monthlySavingsGoal", ge=0)
+
+
 class SharedBillRequest(BaseModel):
     amount: float = Field(gt=0)
     category_id: Optional[int] = Field(default=None, alias="categoryId")
