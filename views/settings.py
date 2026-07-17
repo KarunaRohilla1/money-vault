@@ -185,12 +185,7 @@ def delete_vault_dialog(vault):
 
 def render_create_vault_form(form_key):
     vaults = get_all_vaults()
-
-    vault_type = st.selectbox(
-        "Vault Type",
-        ["Individual", "Shared"],
-        key=f"{form_key}_vault_type"
-    )
+    vault_type = "Shared"
 
     with st.form(form_key):
         name_col, pin_col, admin_col = st.columns(
@@ -229,7 +224,6 @@ def render_create_vault_form(form_key):
         selected_share_names = st.multiselect(
             "Shared With",
             list(share_options.keys()),
-            disabled=vault_type == "Individual",
             key=f"{form_key}_shared_with"
         )
 
@@ -255,7 +249,7 @@ def render_create_vault_form(form_key):
             shared_vault_ids = [
                 share_options[share_name]
                 for share_name in selected_share_names
-            ] if vault_type == "Shared" else []
+            ]
 
             if not name:
                 st.error("Vault name is required.")
@@ -269,7 +263,7 @@ def render_create_vault_form(form_key):
                 st.error("PIN must be between 4 and 6 characters.")
                 st.stop()
 
-            if vault_type == "Shared" and not shared_vault_ids:
+            if not shared_vault_ids:
                 st.error("Choose at least one user for a shared vault.")
                 st.stop()
 
