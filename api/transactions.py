@@ -8,6 +8,8 @@ from api.resources import (
     int_vault_id,
     require_account,
     require_category,
+    require_shared_participant,
+    require_shared_vault,
     require_transaction
 )
 from api.schemas import (
@@ -28,6 +30,28 @@ from db.transactions import (
 
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
+
+
+def validate_shared_transaction_request(request, vault_id):
+    beneficiary_vault_id = request.beneficiary_vault_id or vault_id
+    if int(beneficiary_vault_id) == int(vault_id):
+        return beneficiary_vault_id
+
+    require_shared_vault(
+        beneficiary_vault_id,
+        vault_id
+    )
+
+    for participant_vault_id in request.participant_vaults or []:
+        require_shared_participant(
+            participant_vault_id,
+            beneficiary_vault_id
+        )
+
+    if vault_id not in (request.participant_vaults or []):
+        raise bad_request("Shared transactions must include the authenticated vault as a participant.")
+
+    return beneficiary_vault_id
 
 
 def adapt_transaction(row):
@@ -98,7 +122,10 @@ def create_transaction(
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
     vault_id = int_vault_id(vault)
-    beneficiary_vault_id = request.beneficiary_vault_id or vault_id
+    beneficiary_vault_id = validate_shared_transaction_request(
+        request,
+        vault_id
+    )
     require_account(
         request.account_id,
         vault_id
@@ -148,6 +175,10 @@ def update_transaction_route(
         request.category_id,
         vault_id
     )
+    beneficiary_vault_id = validate_shared_transaction_request(
+        request,
+        vault_id
+    )
 
     try:
         update_transaction(
@@ -159,7 +190,7 @@ def update_transaction_route(
             request.notes,
             transaction_type=request.transaction_type,
             vault_id=vault_id,
-            beneficiary_vault_id=request.beneficiary_vault_id or vault_id,
+            beneficiary_vault_id=beneficiary_vault_id,
             allocation_method=request.allocation_method,
             participant_vaults=request.participant_vaults,
             percentage_allocations=request.percentage_allocations,

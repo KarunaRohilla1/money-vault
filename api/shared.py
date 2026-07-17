@@ -87,6 +87,26 @@ def shared_vault_id_for_instance(instance_id):
     return int(row[0])
 
 
+def shared_vault_id_for_bill(bill_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT shared_vault_id
+            FROM shared_bills
+            WHERE id = ?
+            """,
+            (bill_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        raise bad_request("Bill not found.")
+
+    return int(row[0])
+
+
 @router.get("/expenses", response_model=SharedPageResponse, response_model_by_alias=True)
 def shared_expenses(
     shared_vault_id: Optional[int] = Query(default=None, alias="sharedVaultId"),
@@ -181,6 +201,9 @@ def update_shared_bill_route(
         bill_id,
         vault_id
     )
+    existing_shared_vault_id = shared_vault_id_for_bill(bill_id)
+    if existing_shared_vault_id != request.shared_vault_id:
+        raise bad_request("Bill shared vault cannot be changed.")
     require_shared_vault(
         request.shared_vault_id,
         vault_id

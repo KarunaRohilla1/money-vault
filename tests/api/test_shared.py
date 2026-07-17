@@ -181,6 +181,39 @@ def test_shared_bill_paid_validates_instance_and_participant(monkeypatch):
     }
 
 
+def test_shared_bill_update_cannot_change_shared_vault(monkeypatch):
+    client = build_client(monkeypatch)
+
+    monkeypatch.setattr(
+        "api.shared.require_shared_bill",
+        lambda bill_id, vault_id: None
+    )
+    monkeypatch.setattr(
+        "api.shared.shared_vault_id_for_bill",
+        lambda bill_id: 41
+    )
+
+    response = client.put(
+        "/api/shared/bills/5",
+        headers=auth_header(),
+        json={
+            "amount": 1200,
+            "dueDay": 10,
+            "frequency": "Monthly",
+            "isActive": True,
+            "name": "Internet",
+            "notes": "",
+            "sharedVaultId": 42
+        }
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "VALIDATION_ERROR",
+        "message": "Bill shared vault cannot be changed."
+    }
+
+
 def test_shared_routes_require_authentication(monkeypatch):
     client = build_client(monkeypatch)
 
