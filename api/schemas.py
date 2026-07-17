@@ -367,3 +367,26 @@ class SettingsResponse(BaseModel):
     accessible_vaults: List[VaultSummaryResponse] = Field(alias="accessibleVaults")
     cycle_start_day: int = Field(alias="cycleStartDay")
     monthly_savings_goal: float = Field(alias="monthlySavingsGoal")
+
+
+class SharedBillRequest(BaseModel):
+    amount: float = Field(gt=0)
+    category_id: Optional[int] = Field(default=None, alias="categoryId")
+    due_day: int = Field(alias="dueDay", ge=1, le=31)
+    end_date: Optional[str] = Field(default=None, alias="endDate")
+    frequency: str = "Monthly"
+    is_active: bool = Field(default=True, alias="isActive")
+    name: str = Field(min_length=1)
+    notes: str = ""
+    shared_vault_id: int = Field(alias="sharedVaultId")
+    start_date: Optional[str] = Field(default=None, alias="startDate")
+
+
+class SharedBillPaymentRequest(BaseModel):
+    notes: str = ""
+    payer_vault_id: int = Field(alias="payerVaultId")
+    payment_date: str = Field(alias="paymentDate", min_length=1)
+
+
+class SharedPageResponse(BaseModel):
+    data: Dict[str, Any]

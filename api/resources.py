@@ -205,6 +205,135 @@ def wishlist_category_belongs_to_vault(category_id, vault_id):
         conn.close()
 
 
+def shared_vault_accessible_to_vault(shared_vault_id, vault_id):
+    conn = get_connection()
+    try:
+        current = conn.execute(
+            """
+            SELECT vault_type
+            FROM vaults
+            WHERE id = ?
+            """,
+            (vault_id,)
+        ).fetchone()
+        if current and current[0] == "Shared" and int(shared_vault_id) == int(vault_id):
+            return True
+
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM vault_shares vs
+            JOIN vaults shared
+                ON vs.vault_id = shared.id
+            WHERE vs.vault_id = ?
+            AND vs.shared_vault_id = ?
+            AND shared.vault_type = 'Shared'
+            """,
+            (
+                shared_vault_id,
+                vault_id
+            )
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def shared_bill_belongs_to_accessible_vault(bill_id, vault_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT shared_vault_id
+            FROM shared_bills
+            WHERE id = ?
+            AND is_active = 1
+            """,
+            (bill_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return bool(
+        row
+        and shared_vault_accessible_to_vault(
+            int(row[0]),
+            vault_id
+        )
+    )
+
+
+def shared_bill_instance_belongs_to_accessible_vault(instance_id, vault_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT c.shared_vault_id
+            FROM shared_bill_instances i
+            JOIN shared_bill_cycles c
+                ON i.cycle_id = c.id
+            WHERE i.id = ?
+            """,
+            (instance_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return bool(
+        row
+        and shared_vault_accessible_to_vault(
+            int(row[0]),
+            vault_id
+        )
+    )
+
+
+def shared_bill_cycle_belongs_to_accessible_vault(cycle_id, vault_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT shared_vault_id
+            FROM shared_bill_cycles
+            WHERE id = ?
+            """,
+            (cycle_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return bool(
+        row
+        and shared_vault_accessible_to_vault(
+            int(row[0]),
+            vault_id
+        )
+    )
+
+
+def participant_belongs_to_shared_vault(participant_vault_id, shared_vault_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM vault_shares vs
+            JOIN vaults participant
+                ON vs.shared_vault_id = participant.id
+            WHERE vs.vault_id = ?
+            AND vs.shared_vault_id = ?
+            AND participant.vault_type = 'Individual'
+            """,
+            (
+                shared_vault_id,
+                participant_vault_id
+            )
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def require_account(account_id, vault_id):
     if not account_belongs_to_vault(
         account_id,
@@ -265,5 +394,45 @@ def require_wishlist_category(category_id, vault_id):
     if not wishlist_category_belongs_to_vault(
         category_id,
         vault_id
+    ):
+        raise not_found()
+
+
+def require_shared_vault(shared_vault_id, vault_id):
+    if not shared_vault_accessible_to_vault(
+        shared_vault_id,
+        vault_id
+    ):
+        raise not_found()
+
+
+def require_shared_bill(bill_id, vault_id):
+    if not shared_bill_belongs_to_accessible_vault(
+        bill_id,
+        vault_id
+    ):
+        raise not_found()
+
+
+def require_shared_bill_instance(instance_id, vault_id):
+    if not shared_bill_instance_belongs_to_accessible_vault(
+        instance_id,
+        vault_id
+    ):
+        raise not_found()
+
+
+def require_shared_bill_cycle(cycle_id, vault_id):
+    if not shared_bill_cycle_belongs_to_accessible_vault(
+        cycle_id,
+        vault_id
+    ):
+        raise not_found()
+
+
+def require_shared_participant(participant_vault_id, shared_vault_id):
+    if not participant_belongs_to_shared_vault(
+        participant_vault_id,
+        shared_vault_id
     ):
         raise not_found()
