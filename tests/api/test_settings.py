@@ -66,6 +66,30 @@ def test_update_settings_persists_onboarding_values(monkeypatch):
     }
 
 
+def test_update_settings_allows_cycle_day_31(monkeypatch):
+    client = build_client(monkeypatch)
+    observed = {}
+
+    monkeypatch.setattr("api.settings.get_vault_by_id", lambda vault_id: vault_row())
+    monkeypatch.setattr("api.settings.get_vault_financial_settings", lambda vault_id: (31, 0))
+    monkeypatch.setattr("api.settings.accessible_vaults_for", lambda current: [api_vault(current)])
+    monkeypatch.setattr(
+        "api.settings.update_vault",
+        lambda vault_id, name, **kwargs: observed.update(kwargs)
+    )
+
+    response = client.patch(
+        "/api/settings",
+        headers=auth_header(),
+        json={
+            "cycleStartDay": 31
+        }
+    )
+
+    assert response.status_code == 200
+    assert observed["month_start_day"] == 31
+
+
 def test_update_settings_returns_safe_validation_error(monkeypatch):
     client = build_client(monkeypatch)
 

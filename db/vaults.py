@@ -208,8 +208,8 @@ def update_vault(
 
         if month_start_day is not None:
             month_start_day = int(month_start_day)
-            if month_start_day < 1 or month_start_day > 28:
-                raise ValueError("Financial cycle start day must be between 1 and 28.")
+            if month_start_day < 1 or month_start_day > 31:
+                raise ValueError("Financial cycle start day must be between 1 and 31.")
             updates.append(
                 "month_start_day = ?"
             )

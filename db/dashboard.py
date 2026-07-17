@@ -63,7 +63,7 @@ def get_dashboard_page_data(vault_id):
                         FROM vaults
                         WHERE id = ?
                         AND COALESCE(financial_cycle_start_day, month_start_day, 0)
-                            BETWEEN 1 AND 28
+                            BETWEEN 1 AND 31
                     ) AS cycle_setting,
                     (
                         SELECT COUNT(*)
@@ -562,7 +562,7 @@ def get_onboarding_status(vault_id):
         "has_vault_login": bool(settings and settings[0]),
 
         "has_cycle_setting": bool(
-            settings and 1 <= int(settings[1] or 0) <= 28
+            settings and 1 <= int(settings[1] or 0) <= 31
         ),
 
         "has_savings_goal": bool(
@@ -583,7 +583,7 @@ def get_onboarding_status(vault_id):
 
             and
 
-            bool(settings and 1 <= int(settings[1] or 0) <= 28)
+            bool(settings and 1 <= int(settings[1] or 0) <= 31)
 
             and
 

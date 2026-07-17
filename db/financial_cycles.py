@@ -1,3 +1,4 @@
+from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -87,8 +88,8 @@ def normalize_start_day(day):
     day = int(day or 1)
     if day < 1:
         return 1
-    if day > 28:
-        return 28
+    if day > 31:
+        return 31
     return day
 
 
@@ -107,8 +108,16 @@ def add_months(value, months):
     month_index = value.month - 1 + months
     year = value.year + month_index // 12
     month = month_index % 12 + 1
-    day = min(value.day, 28)
+    day = min(value.day, monthrange(year, month)[1])
     return date(year, month, day)
+
+
+def date_for_cycle_day(year, month, start_day):
+    return date(
+        year,
+        month,
+        min(start_day, monthrange(year, month)[1])
+    )
 
 
 def derive_cycle_status(cycle_start, cycle_end, today=None):
@@ -154,7 +163,7 @@ def get_vault_cycle_start_day_with_cursor(cursor, vault_id):
 
 def scheduled_cycle_start_for(target_date, start_day):
     start_day = normalize_start_day(start_day)
-    current_month_start = date(
+    current_month_start = date_for_cycle_day(
         target_date.year,
         target_date.month,
         start_day
