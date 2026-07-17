@@ -17,10 +17,12 @@ from api.schemas import (
     SharedBillPaymentRequest,
     SharedBillRequest,
     SharedPageResponse,
+    SharedSettlementRequest,
     SuccessResponse,
     VaultContext
 )
 from db.financial_cycles import get_current_cycle
+from db.accounts import get_accounts_with_balances
 from db.core import get_connection
 from db.shared_bills import (
     add_shared_bill,
@@ -32,7 +34,11 @@ from db.shared_bills import (
     skip_bill_instance,
     update_shared_bill
 )
-from db.shared_expenses import get_shared_expenses_page_data
+from db.shared_expenses import (
+    get_settlement_summary,
+    get_shared_expenses_page_data,
+    settle_outstanding_settlement
+)
 from db.vaults import get_connected_shared_vaults, get_vault_by_id
 
 
@@ -107,6 +113,44 @@ def shared_vault_id_for_bill(bill_id):
     return int(row[0])
 
 
+def adapt_settlement_account(row):
+    return {
+        "balance": float(row[5]) if len(row) > 5 and row[5] is not None else None,
+        "id": int(row[0]),
+        "is_primary": bool(row[4]),
+        "name": row[1],
+        "type": row[2]
+    }
+
+
+def settlement_summary_with_accounts(vault_id):
+    cycle = get_current_cycle(vault_id)
+    summary = get_settlement_summary(
+        vault_id,
+        cycle.start_iso,
+        cycle.end_iso
+    )
+
+    items = []
+    for item in summary["items"]:
+        items.append({
+            **item,
+            "from_accounts": [
+                adapt_settlement_account(row)
+                for row in get_accounts_with_balances(item["from_vault_id"])
+            ],
+            "to_accounts": [
+                adapt_settlement_account(row)
+                for row in get_accounts_with_balances(item["to_vault_id"])
+            ]
+        })
+
+    return {
+        **summary,
+        "items": items
+    }
+
+
 @router.get("/expenses", response_model=SharedPageResponse, response_model_by_alias=True)
 def shared_expenses(
     shared_vault_id: Optional[int] = Query(default=None, alias="sharedVaultId"),
@@ -136,6 +180,15 @@ def shared_expenses(
             date_to or end_date,
             category_id=category_id,
             paid_by_vault_id=paid_by_vault_id
+        )
+    )
+
+
+@router.get("/settlements", response_model=SharedPageResponse, response_model_by_alias=True)
+def shared_settlements(vault: VaultContext = Depends(get_authenticated_vault)):
+    return SharedPageResponse(
+        data=settlement_summary_with_accounts(
+            int_vault_id(vault)
         )
     )
 
@@ -285,6 +338,39 @@ def mark_shared_bill_paid_route(
             request.payer_vault_id,
             request.payment_date,
             notes=request.notes
+        )
+    except ValueError as error:
+        raise bad_request(str(error)) from error
+    return SuccessResponse()
+
+
+@router.post("/settlements", response_model=SuccessResponse, response_model_by_alias=True)
+def mark_shared_settlement_route(
+    request: SharedSettlementRequest,
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    vault_id = int_vault_id(vault)
+    require_shared_vault(
+        request.shared_vault_id,
+        vault_id
+    )
+    require_shared_participant(
+        request.from_vault_id,
+        request.shared_vault_id
+    )
+    require_shared_participant(
+        request.to_vault_id,
+        request.shared_vault_id
+    )
+    try:
+        settle_outstanding_settlement(
+            request.shared_vault_id,
+            request.from_vault_id,
+            request.from_account_id,
+            request.to_vault_id,
+            request.to_account_id,
+            request.amount,
+            request.settlement_date
         )
     except ValueError as error:
         raise bad_request(str(error)) from error

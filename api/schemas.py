@@ -388,5 +388,15 @@ class SharedBillPaymentRequest(BaseModel):
     payment_date: str = Field(alias="paymentDate", min_length=1)
 
 
+class SharedSettlementRequest(BaseModel):
+    amount: float = Field(gt=0)
+    from_account_id: int = Field(alias="fromAccountId")
+    from_vault_id: int = Field(alias="fromVaultId")
+    settlement_date: str = Field(alias="settlementDate", min_length=1)
+    shared_vault_id: int = Field(alias="sharedVaultId")
+    to_account_id: int = Field(alias="toAccountId")
+    to_vault_id: int = Field(alias="toVaultId")
+
+
 class SharedPageResponse(BaseModel):
     data: Dict[str, Any]
