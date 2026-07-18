@@ -59,10 +59,15 @@ def accessible_vaults_for(current_vault):
 def settings(vault: VaultContext = Depends(get_authenticated_vault)):
     vault_id = int_vault_id(vault)
     current = get_vault_by_id(vault_id)
+    accessible_source = current
+    if vault.authenticated_vault_id:
+        authenticated = get_vault_by_id(vault.authenticated_vault_id)
+        if authenticated:
+            accessible_source = authenticated
     financial = get_vault_financial_settings(vault_id)
     return SettingsResponse(
         currentVault=adapt_vault(current),
-        accessibleVaults=accessible_vaults_for(current),
+        accessibleVaults=accessible_vaults_for(accessible_source),
         cycleStartDay=int(financial[0] or 1),
         monthlySavingsGoal=float(financial[1] or 0)
     )

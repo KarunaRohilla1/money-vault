@@ -17,13 +17,21 @@ class ExpiredAuthError(AuthError):
     pass
 
 
-def create_access_token(vault):
+def create_access_token(vault, authenticated_vault=None):
     config = get_config()
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=config.jwt_expiry_days)
+    authenticated = authenticated_vault or vault
 
     payload = {
-        "sub": str(vault.id),
+        "sub": str(authenticated.id),
+        "authenticated_vault_name": authenticated.name,
+        "authenticated_vault_type": authenticated.vault_type,
+        "authenticated_is_admin": authenticated.is_admin,
+        "active_vault_id": str(vault.id),
+        "active_vault_name": vault.name,
+        "active_vault_type": vault.vault_type,
+        "active_is_admin": vault.is_admin,
         "vault_name": vault.name,
         "vault_type": vault.vault_type,
         "is_admin": vault.is_admin,
@@ -56,11 +64,15 @@ def verify_access_token(token):
         raise AuthError() from error
 
     try:
+        authenticated_vault_id = str(payload["sub"])
         return VaultContext(
-            id=str(payload["sub"]),
-            name=str(payload["vault_name"]),
-            isAdmin=bool(payload["is_admin"]),
-            vaultType=str(payload["vault_type"])
+            id=str(payload.get("active_vault_id", payload["sub"])),
+            name=str(payload.get("active_vault_name", payload["vault_name"])),
+            isAdmin=bool(payload.get("active_is_admin", payload["is_admin"])),
+            vaultType=str(payload.get("active_vault_type", payload["vault_type"])),
+            authenticatedVaultId=authenticated_vault_id,
+            authenticatedVaultName=str(payload.get("authenticated_vault_name", payload["vault_name"])),
+            authenticatedVaultType=str(payload.get("authenticated_vault_type", payload["vault_type"]))
         )
     except (KeyError, TypeError, ValueError) as error:
         raise AuthError() from error

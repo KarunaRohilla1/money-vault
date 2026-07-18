@@ -67,10 +67,16 @@ def adapt_dashboard_response(vault: VaultContext, payload, cycle):
     summary = safe_payload["summary"]
     status_payload = safe_payload["status"]
     settlement = summary["settlement_summary"]
+    response_vault = VaultContext(
+        id=vault.id,
+        name=vault.name,
+        isAdmin=vault.is_admin,
+        vaultType=vault.vault_type
+    )
 
     return DashboardResponse(
         generatedAt=datetime.now(timezone.utc),
-        vault=vault,
+        vault=response_vault,
         data=DashboardDataResponse(
             cycle=FinancialCycleResponse(
                 id=cycle.id,
@@ -122,7 +128,7 @@ def adapt_dashboard_response(vault: VaultContext, payload, cycle):
     )
 
 
-@router.get("/dashboard", response_model=DashboardResponse, response_model_by_alias=True)
+@router.get("/dashboard", response_model=DashboardResponse, response_model_by_alias=True, response_model_exclude_none=True)
 def dashboard(vault: VaultContext = Depends(get_authenticated_vault)):
     try:
         vault_id = int(vault.id)

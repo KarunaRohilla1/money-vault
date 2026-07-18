@@ -18,6 +18,9 @@ class VaultContext(BaseModel):
     name: str
     is_admin: bool = Field(alias="isAdmin")
     vault_type: str = Field(alias="vaultType")
+    authenticated_vault_id: Optional[str] = Field(default=None, alias="authenticatedVaultId")
+    authenticated_vault_name: Optional[str] = Field(default=None, alias="authenticatedVaultName")
+    authenticated_vault_type: Optional[str] = Field(default=None, alias="authenticatedVaultType")
 
 
 class LoginResponse(BaseModel):
@@ -25,7 +28,15 @@ class LoginResponse(BaseModel):
 
     token: str
     vault: VaultContext
+    authenticated_vault: Optional[VaultContext] = Field(default=None, alias="authenticatedVault")
     expires_at: Optional[str] = Field(default=None, alias="expiresAt")
+
+
+class SharedVaultActivationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    shared_vault_id: int = Field(alias="sharedVaultId")
+    pin: str = Field(min_length=1)
 
 
 class FinancialCycleResponse(BaseModel):
@@ -367,6 +378,14 @@ class SettingsResponse(BaseModel):
     accessible_vaults: List[VaultSummaryResponse] = Field(alias="accessibleVaults")
     cycle_start_day: int = Field(alias="cycleStartDay")
     monthly_savings_goal: float = Field(alias="monthlySavingsGoal")
+
+
+class SessionResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    vault: VaultContext
+    authenticated_vault: VaultContext = Field(alias="authenticatedVault")
+    accessible_vaults: List[VaultSummaryResponse] = Field(alias="accessibleVaults")
 
 
 class SettingsUpdateRequest(BaseModel):
