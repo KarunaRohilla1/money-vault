@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -66,8 +67,8 @@ def validate_transfer_request(request, vault_id):
 @router.get("", response_model=list[TransferResponse], response_model_by_alias=True)
 def list_transfers(
     account_id: Optional[int] = Query(default=None, alias="accountId"),
-    date_from: Optional[str] = Query(default=None, alias="dateFrom"),
-    date_to: Optional[str] = Query(default=None, alias="dateTo"),
+    date_from: Optional[date] = Query(default=None, alias="dateFrom"),
+    date_to: Optional[date] = Query(default=None, alias="dateTo"),
     limit: Optional[int] = None,
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
@@ -75,8 +76,8 @@ def list_transfers(
         adapt_transfer(row)
         for row in get_transfers(
             int_vault_id(vault),
-            date_from=date_from,
-            date_to=date_to,
+            date_from=date_from.isoformat() if date_from else None,
+            date_to=date_to.isoformat() if date_to else None,
             account_id=account_id,
             limit=limit
         )
@@ -103,7 +104,7 @@ def create_transfer(request: TransferCreateRequest, vault: VaultContext = Depend
         vault_id,
         request.from_account_id,
         request.to_account_id,
-        request.date,
+        request.date.isoformat(),
         request.amount,
         request.notes
     )
@@ -129,7 +130,7 @@ def update_transfer_route(
         transfer_group_id,
         request.from_account_id,
         request.to_account_id,
-        request.date,
+        request.date.isoformat(),
         request.amount,
         request.notes
     )

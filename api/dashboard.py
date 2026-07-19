@@ -45,9 +45,28 @@ def number(value):
     return float(value or 0)
 
 
+def cash_flow_direction(transaction_type):
+    normalized = str(transaction_type or "").strip().lower()
+    if normalized in ("income", "transfer in"):
+        return "credit"
+    if normalized in ("expense", "transfer out"):
+        return "debit"
+    return "neutral"
+
+
+def signed_amount(amount, direction):
+    value = number(amount)
+    if direction == "credit":
+        return abs(value)
+    if direction == "debit":
+        return -abs(value)
+    return 0
+
+
 def adapt_recent_activity(rows):
     items = []
     for row in rows[:5]:
+        direction = cash_flow_direction(row[5])
         items.append(
             RecentActivityItem(
                 id=int(row[0]),
@@ -55,6 +74,8 @@ def adapt_recent_activity(rows):
                 accountName=row[2],
                 categoryName=str(row[3]),
                 amount=number(row[4]),
+                signedAmount=signed_amount(row[4], direction),
+                direction=direction,
                 transactionType=str(row[5]),
                 notes=row[6]
             )
@@ -108,7 +129,11 @@ def adapt_dashboard_response(vault: VaultContext, payload, cycle):
             ),
             recentActivity=adapt_recent_activity(safe_payload.get("recent_activity", [])),
             spendingByCategory=[
-                CategorySpendItem(name=str(item[0]), amount=number(item[1]))
+                CategorySpendItem(
+                    categoryId=int(item[0]) if len(item) > 2 and item[0] is not None else None,
+                    name=str(item[1] if len(item) > 2 else item[0]),
+                    amount=number(item[2] if len(item) > 2 else item[1])
+                )
                 for item in safe_payload.get("category_spending", [])
             ],
             setup=SetupStatusResponse(

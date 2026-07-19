@@ -1,5 +1,5 @@
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import date, datetime
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -72,11 +72,14 @@ class RecentActivityItem(BaseModel):
     account_name: Optional[str] = Field(default=None, alias="accountName")
     category_name: str = Field(alias="categoryName")
     amount: float
+    signed_amount: float = Field(alias="signedAmount")
+    direction: Literal["credit", "debit", "neutral"]
     transaction_type: str = Field(alias="transactionType")
     notes: Optional[str] = None
 
 
 class CategorySpendItem(BaseModel):
+    category_id: Optional[int] = Field(default=None, alias="categoryId")
     name: str
     amount: float
 
@@ -131,7 +134,7 @@ class AccountResponse(BaseModel):
 
 class AccountCreateRequest(BaseModel):
     name: str = Field(min_length=1)
-    type: str = Field(min_length=1)
+    type: Optional[str] = None
     opening_balance: float = Field(alias="openingBalance")
     is_primary: bool = Field(default=False, alias="isPrimary")
 
@@ -225,7 +228,7 @@ class TransferDetailResponse(BaseModel):
 class TransferCreateRequest(BaseModel):
     from_account_id: int = Field(alias="fromAccountId")
     to_account_id: int = Field(alias="toAccountId")
-    date: str = Field(min_length=1)
+    date: date
     amount: float = Field(gt=0)
     notes: str = ""
 

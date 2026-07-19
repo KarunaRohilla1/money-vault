@@ -80,8 +80,8 @@ def dashboard_payload():
             "safe_to_spend": Decimal("38240.00")
         },
         "category_spending": [
-            ("Food & Dining", Decimal("8800.00")),
-            ("Shopping", Decimal("6500.00"))
+            (11, "Food & Dining", Decimal("8800.00")),
+            (12, "Shopping", Decimal("6500.00"))
         ],
         "recent_activity": [
             [1, date(2026, 7, 12), "HDFC Bank", "Coffee", Decimal("220.00"), "Expense", "Starbucks"],
@@ -182,6 +182,9 @@ def test_dashboard_adapter_serializes_decimal_and_dates(monkeypatch):
 
     assert body["data"]["safeToSpend"] == 38240.0
     assert body["data"]["recentActivity"][0]["date"] == "2026-07-12"
+    assert body["data"]["recentActivity"][0]["direction"] == "debit"
+    assert body["data"]["recentActivity"][0]["signedAmount"] == -220.0
+    assert body["data"]["spendingByCategory"][0]["categoryId"] == 11
     assert body["data"]["settlement"]["items"][0]["created_at"] == "2026-07-12T08:30:00"
 
 
@@ -199,6 +202,37 @@ def test_recent_activity_contains_at_most_five_records(monkeypatch):
 
     assert response.status_code == 200
     assert len(response.json()["data"]["recentActivity"]) == 5
+
+
+def test_recent_activity_direction_is_backend_owned(monkeypatch):
+    client = build_client(monkeypatch)
+    token = make_token(monkeypatch)
+
+    payload = dashboard_payload()
+    payload["recent_activity"] = [
+        [1, "2026-07-10", "HDFC Bank", "Salary", Decimal("1000.00"), "Income", None],
+        [2, "2026-07-10", "HDFC Bank", "Coffee", Decimal("100.00"), "Expense", None],
+        [3, "2026-07-10", "HDFC Bank", "Transfer", Decimal("200.00"), "Transfer In", None],
+        [4, "2026-07-10", "HDFC Bank", "Transfer", Decimal("300.00"), "Transfer Out", None],
+        [5, "2026-07-10", "HDFC Bank", "Other", Decimal("50.00"), "Refund", None],
+    ]
+    monkeypatch.setattr("api.dashboard.get_dashboard_page_data", lambda vault_id: payload)
+    monkeypatch.setattr("api.dashboard.get_current_cycle", lambda vault_id: cycle())
+
+    response = client.get(
+        "/api/dashboard",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    items = response.json()["data"]["recentActivity"]
+    assert [(item["direction"], item["signedAmount"]) for item in items] == [
+        ("credit", 1000.0),
+        ("debit", -100.0),
+        ("credit", 200.0),
+        ("debit", -300.0),
+        ("neutral", 0.0),
+    ]
 
 
 def test_dashboard_response_matches_mobile_contract(monkeypatch):
