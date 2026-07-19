@@ -422,7 +422,8 @@ def get_account_by_id(account_id):
                 name,
                 type,
                 opening_balance,
-                is_primary
+                is_primary,
+                vault_id
             FROM accounts
             WHERE id = ?
             """,

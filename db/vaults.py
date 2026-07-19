@@ -613,7 +613,8 @@ def delete_vault(vault_id):
                     ON c.id = i.cycle_id
                 LEFT JOIN shared_bills b
                     ON b.id = i.bill_id
-                WHERE c.shared_vault_id = ?
+                WHERE i.payer_vault_id = ?
+                OR c.shared_vault_id = ?
                 OR b.shared_vault_id = ?
                 OR b.category_id IN (
                     SELECT id
@@ -626,6 +627,7 @@ def delete_vault(vault_id):
                 vault_id,
                 vault_id,
                 vault_id,
+                vault_id,
                 vault_id
             )
         )
@@ -633,7 +635,8 @@ def delete_vault(vault_id):
         cursor.execute(
             """
             DELETE FROM shared_bill_instances
-            WHERE cycle_id IN (
+            WHERE payer_vault_id = ?
+            OR cycle_id IN (
                 SELECT id
                 FROM shared_bill_cycles
                 WHERE shared_vault_id = ?
@@ -652,8 +655,33 @@ def delete_vault(vault_id):
             (
                 vault_id,
                 vault_id,
+                vault_id,
                 vault_id
             )
+        )
+
+        cursor.execute(
+            """
+            DELETE FROM cycle_contributions
+            WHERE participant_vault_id = ?
+            OR cycle_id IN (
+                SELECT id
+                FROM financial_cycles
+                WHERE vault_id = ?
+            )
+            """,
+            (
+                vault_id,
+                vault_id
+            )
+        )
+
+        cursor.execute(
+            """
+            DELETE FROM financial_cycles
+            WHERE vault_id = ?
+            """,
+            (vault_id,)
         )
 
         cursor.execute(

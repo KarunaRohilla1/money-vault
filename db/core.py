@@ -12,8 +12,8 @@ ACCOUNT_TYPES = [
     "Salary Account",
     "Savings Account",
     "Credit Card",
-    "Investment",
-    "Retirement"
+    "Cash",
+    "Other"
 ]
 
 INCOME = "Income"
