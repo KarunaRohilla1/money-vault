@@ -80,6 +80,7 @@ class RecentActivityItem(BaseModel):
 
 class CategorySpendItem(BaseModel):
     category_id: Optional[int] = Field(default=None, alias="categoryId")
+    key: str
     name: str
     amount: float
 

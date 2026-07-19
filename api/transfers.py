@@ -18,6 +18,7 @@ from db.transfers import (
     delete_transfer,
     get_transfer_by_group,
     get_transfers,
+    TransferPairIntegrityError,
     update_transfer
 )
 
@@ -64,6 +65,18 @@ def validate_transfer_request(request, vault_id):
     )
 
 
+def transfer_pair_conflict():
+    from fastapi import HTTPException, status
+
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "TRANSFER_PAIR_CORRUPTED",
+            "message": "Transfer could not be changed because its paired records are inconsistent."
+        }
+    )
+
+
 @router.get("", response_model=list[TransferResponse], response_model_by_alias=True)
 def list_transfers(
     account_id: Optional[int] = Query(default=None, alias="accountId"),
@@ -100,14 +113,17 @@ def create_transfer(request: TransferCreateRequest, vault: VaultContext = Depend
         request,
         vault_id
     )
-    transfer_group_id = add_transfer(
-        vault_id,
-        request.from_account_id,
-        request.to_account_id,
-        request.date.isoformat(),
-        request.amount,
-        request.notes
-    )
+    try:
+        transfer_group_id = add_transfer(
+            vault_id,
+            request.from_account_id,
+            request.to_account_id,
+            request.date.isoformat(),
+            request.amount,
+            request.notes
+        )
+    except TransferPairIntegrityError as error:
+        raise transfer_pair_conflict() from error
     return adapt_transfer_detail(get_transfer_by_group(transfer_group_id))
 
 
@@ -126,14 +142,17 @@ def update_transfer_route(
         request,
         vault_id
     )
-    update_transfer(
-        transfer_group_id,
-        request.from_account_id,
-        request.to_account_id,
-        request.date.isoformat(),
-        request.amount,
-        request.notes
-    )
+    try:
+        update_transfer(
+            transfer_group_id,
+            request.from_account_id,
+            request.to_account_id,
+            request.date.isoformat(),
+            request.amount,
+            request.notes
+        )
+    except TransferPairIntegrityError as error:
+        raise transfer_pair_conflict() from error
     return adapt_transfer_detail(get_transfer_by_group(transfer_group_id))
 
 
@@ -143,5 +162,8 @@ def delete_transfer_route(transfer_group_id: str, vault: VaultContext = Depends(
         transfer_group_id,
         int_vault_id(vault)
     )
-    delete_transfer(transfer_group_id)
+    try:
+        delete_transfer(transfer_group_id)
+    except TransferPairIntegrityError as error:
+        raise transfer_pair_conflict() from error
     return SuccessResponse()

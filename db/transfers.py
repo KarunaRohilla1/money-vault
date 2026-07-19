@@ -8,6 +8,52 @@ from db.core import (
 from db.cache import cache_data, clear_data_cache
 
 
+class TransferPairIntegrityError(Exception):
+    pass
+
+
+def rollback_connection(conn):
+    rollback = getattr(conn, "rollback", None)
+    if rollback:
+        rollback()
+
+
+def require_valid_transfer_pair(
+    transfer_group_id,
+    vault_id=None,
+    conn=None
+):
+    owns_connection = conn is None
+    connection = conn or get_connection()
+    try:
+        rows = connection.execute(
+            """
+            SELECT id, vault_id, transaction_type
+            FROM transactions
+            WHERE transfer_group_id = ?
+            AND is_deleted = 0
+            """,
+            (transfer_group_id,)
+        ).fetchall()
+
+        if vault_id is not None and any(int(row[1]) != int(vault_id) for row in rows):
+            raise TransferPairIntegrityError("Transfer pair is corrupted.")
+
+        transfer_out_rows = [row for row in rows if row[2] == TRANSFER_OUT]
+        transfer_in_rows = [row for row in rows if row[2] == TRANSFER_IN]
+
+        if len(rows) != 2 or len(transfer_out_rows) != 1 or len(transfer_in_rows) != 1:
+            raise TransferPairIntegrityError("Transfer pair is corrupted.")
+
+        return {
+            "in_id": transfer_in_rows[0][0],
+            "out_id": transfer_out_rows[0][0]
+        }
+    finally:
+        if owns_connection:
+            connection.close()
+
+
 def add_transfer(
     vault_id,
     from_account_id,
@@ -23,7 +69,7 @@ def add_transfer(
             uuid.uuid4()
         )
 
-        conn.execute(
+        out_cursor = conn.execute(
             """
             INSERT INTO transactions
             (
@@ -52,7 +98,7 @@ def add_transfer(
             capture_lastrowid=False
         )
 
-        conn.execute(
+        in_cursor = conn.execute(
             """
             INSERT INTO transactions
             (
@@ -81,6 +127,9 @@ def add_transfer(
             capture_lastrowid=False
         )
 
+        if getattr(out_cursor, "rowcount", 1) != 1 or getattr(in_cursor, "rowcount", 1) != 1:
+            raise TransferPairIntegrityError("Transfer pair is corrupted.")
+
         conn.commit()
         clear_data_cache((
             "transfers",
@@ -92,6 +141,10 @@ def add_transfer(
 
         return transfer_group_id
 
+
+    except Exception:
+        rollback_connection(conn)
+        raise
 
     finally:
         conn.close()
@@ -237,8 +290,12 @@ def update_transfer(
 
     conn = get_connection()
     try:
+        pair = require_valid_transfer_pair(
+            transfer_group_id,
+            conn=conn
+        )
 
-        conn.execute(
+        out_cursor = conn.execute(
             """
             UPDATE transactions
             SET
@@ -246,20 +303,18 @@ def update_transfer(
                 date = ?,
                 amount = ?,
                 notes = ?
-            WHERE transfer_group_id = ?
-            AND transaction_type = ?
+            WHERE id = ?
             """,
             (
                 from_account_id,
                 transfer_date,
                 amount,
                 notes,
-                transfer_group_id,
-                TRANSFER_OUT
+                pair["out_id"]
             )
         )
 
-        conn.execute(
+        in_cursor = conn.execute(
             """
             UPDATE transactions
             SET
@@ -267,18 +322,19 @@ def update_transfer(
                 date = ?,
                 amount = ?,
                 notes = ?
-            WHERE transfer_group_id = ?
-            AND transaction_type = ?
+            WHERE id = ?
             """,
             (
                 to_account_id,
                 transfer_date,
                 amount,
                 notes,
-                transfer_group_id,
-                TRANSFER_IN
+                pair["in_id"]
             )
         )
+
+        if getattr(out_cursor, "rowcount", 0) != 1 or getattr(in_cursor, "rowcount", 0) != 1:
+            raise TransferPairIntegrityError("Transfer pair is corrupted.")
 
         conn.commit()
         clear_data_cache((
@@ -289,6 +345,10 @@ def update_transfer(
             "reports"
         ))
 
+
+    except Exception:
+        rollback_connection(conn)
+        raise
 
     finally:
         conn.close()
@@ -298,14 +358,24 @@ def delete_transfer(
 
     conn = get_connection()
     try:
+        pair = require_valid_transfer_pair(
+            transfer_group_id,
+            conn=conn
+        )
 
-        conn.execute(
+        cursor = conn.execute(
             """
             DELETE FROM transactions
-            WHERE transfer_group_id = ?
+            WHERE id IN (?, ?)
             """,
-            (transfer_group_id,)
+            (
+                pair["out_id"],
+                pair["in_id"]
+            )
         )
+
+        if getattr(cursor, "rowcount", 0) != 2:
+            raise TransferPairIntegrityError("Transfer pair is corrupted.")
 
         conn.commit()
         clear_data_cache((
@@ -315,6 +385,10 @@ def delete_transfer(
             "dashboard",
             "reports"
         ))
+
+    except Exception:
+        rollback_connection(conn)
+        raise
 
     finally:
         conn.close()

@@ -185,6 +185,7 @@ def test_dashboard_adapter_serializes_decimal_and_dates(monkeypatch):
     assert body["data"]["recentActivity"][0]["direction"] == "debit"
     assert body["data"]["recentActivity"][0]["signedAmount"] == -220.0
     assert body["data"]["spendingByCategory"][0]["categoryId"] == 11
+    assert body["data"]["spendingByCategory"][0]["key"] == "category:11"
     assert body["data"]["settlement"]["items"][0]["created_at"] == "2026-07-12T08:30:00"
 
 
@@ -233,6 +234,28 @@ def test_recent_activity_direction_is_backend_owned(monkeypatch):
         ("debit", -300.0),
         ("neutral", 0.0),
     ]
+
+
+def test_category_spending_gets_stable_backend_keys_for_duplicate_names(monkeypatch):
+    from api.dashboard import adapt_dashboard_response
+    from api.schemas import VaultContext
+
+    payload = dashboard_payload()
+    payload["category_spending"] = [
+        (11, "Food", Decimal("100.00")),
+        (12, "Food", Decimal("50.00")),
+        (None, "Uncategorized", Decimal("25.00")),
+    ]
+
+    response = adapt_dashboard_response(
+        VaultContext(id="7", name="Karuna", isAdmin=True, vaultType="Individual"),
+        payload,
+        cycle()
+    )
+    categories = response.model_dump(by_alias=True)["data"]["spendingByCategory"]
+
+    assert [item["key"] for item in categories] == ["category:11", "category:12", "uncategorized"]
+    assert [item["name"] for item in categories] == ["Food", "Food", "Uncategorized"]
 
 
 def test_dashboard_response_matches_mobile_contract(monkeypatch):

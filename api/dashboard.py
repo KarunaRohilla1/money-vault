@@ -63,6 +63,17 @@ def signed_amount(amount, direction):
     return 0
 
 
+def category_key(category_id, name):
+    if category_id is not None:
+        return f"category:{category_id}"
+
+    normalized_name = str(name or "").strip().lower()
+    if normalized_name in ("", "uncategorized"):
+        return "uncategorized"
+
+    return f"legacy-category:{normalized_name}"
+
+
 def adapt_recent_activity(rows):
     items = []
     for row in rows[:5]:
@@ -131,6 +142,7 @@ def adapt_dashboard_response(vault: VaultContext, payload, cycle):
             spendingByCategory=[
                 CategorySpendItem(
                     categoryId=int(item[0]) if len(item) > 2 and item[0] is not None else None,
+                    key=category_key(item[0] if len(item) > 2 else None, item[1] if len(item) > 2 else item[0]),
                     name=str(item[1] if len(item) > 2 else item[0]),
                     amount=number(item[2] if len(item) > 2 else item[1])
                 )
