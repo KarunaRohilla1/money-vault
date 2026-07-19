@@ -287,6 +287,36 @@ def test_valid_pair_delete_succeeds(monkeypatch, transfer_db):
     assert transfer_rows(transfer_db, "group-1") == []
 
 
+def test_get_transfers_filters_by_source_and_destination(monkeypatch, transfer_db):
+    from db.core import TRANSFER_IN, TRANSFER_OUT
+    from db.transfers import get_transfers
+
+    connection = sqlite3.connect(transfer_db)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE accounts (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            INSERT INTO accounts (id, name) VALUES (1, 'Salary'), (2, 'Savings'), (3, 'Cash');
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    install_transfer_connection(monkeypatch, transfer_db)
+    insert_transfer_row(transfer_db, "group-1", TRANSFER_OUT, account_id=1)
+    insert_transfer_row(transfer_db, "group-1", TRANSFER_IN, account_id=2)
+    insert_transfer_row(transfer_db, "group-2", TRANSFER_OUT, account_id=3)
+    insert_transfer_row(transfer_db, "group-2", TRANSFER_IN, account_id=2)
+
+    transfers = get_transfers(4, source_account_id=1, destination_account_id=2)
+
+    assert [row[0] for row in transfers] == ["group-1"]
+
+
 @pytest.mark.parametrize(
     ("rows", "expected_message"),
     [

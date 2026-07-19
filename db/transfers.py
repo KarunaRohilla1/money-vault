@@ -154,6 +154,8 @@ def get_transfers(
     date_from=None,
     date_to=None,
     account_id=None,
+    source_account_id=None,
+    destination_account_id=None,
     limit=None
 ):
 
@@ -217,6 +219,20 @@ def get_transfers(
                 account_id,
                 account_id
             ])
+
+        if source_account_id:
+
+            query += """
+            AND out_t.account_id = ?
+            """
+            params.append(source_account_id)
+
+        if destination_account_id:
+
+            query += """
+            AND in_t.account_id = ?
+            """
+            params.append(destination_account_id)
 
         query += """
         ORDER BY out_t.date DESC, out_t.id DESC

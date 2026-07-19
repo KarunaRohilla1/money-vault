@@ -80,18 +80,33 @@ def transfer_pair_conflict():
 @router.get("", response_model=list[TransferResponse], response_model_by_alias=True)
 def list_transfers(
     account_id: Optional[int] = Query(default=None, alias="accountId"),
+    source_account_id: Optional[int] = Query(default=None, alias="sourceAccountId"),
+    destination_account_id: Optional[int] = Query(default=None, alias="destinationAccountId"),
     date_from: Optional[date] = Query(default=None, alias="dateFrom"),
     date_to: Optional[date] = Query(default=None, alias="dateTo"),
     limit: Optional[int] = None,
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
+    vault_id = int_vault_id(vault)
+
+    if account_id is not None:
+        require_account(account_id, vault_id)
+
+    if source_account_id is not None:
+        require_account(source_account_id, vault_id)
+
+    if destination_account_id is not None:
+        require_account(destination_account_id, vault_id)
+
     return [
         adapt_transfer(row)
         for row in get_transfers(
-            int_vault_id(vault),
+            vault_id,
             date_from=date_from.isoformat() if date_from else None,
             date_to=date_to.isoformat() if date_to else None,
             account_id=account_id,
+            source_account_id=source_account_id,
+            destination_account_id=destination_account_id,
             limit=limit
         )
     ]
