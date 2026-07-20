@@ -86,6 +86,199 @@ def test_shared_expenses_wraps_legacy_page_data(monkeypatch):
     }
 
 
+
+def test_shared_dashboard_composes_legacy_shared_helpers(monkeypatch):
+    client = build_client(monkeypatch)
+    observed = {}
+
+    cycle = SimpleNamespace(
+        id=9,
+        start_iso="2026-07-01",
+        end_iso="2026-07-31",
+        display_name="1 Jul 2026 - 31 Jul 2026",
+        status="Current",
+        days_completed=10,
+        days_remaining=21,
+        total_days=31,
+        progress_percent=32
+    )
+
+    monkeypatch.setattr(
+        "api.shared.resolve_shared_vault_id",
+        lambda vault_id, shared_vault_id=None: 40
+    )
+    monkeypatch.setattr(
+        "api.shared.get_current_cycle",
+        lambda shared_vault_id: cycle
+    )
+    monkeypatch.setattr(
+        "api.shared.get_vault_by_id",
+        lambda vault_id: (40, "Home", "hash", False, "Shared")
+    )
+
+    def fake_expenses(shared_vault_id, start_date, end_date, category_id=None, paid_by_vault_id=None):
+        observed["expenses"] = (shared_vault_id, start_date, end_date, category_id, paid_by_vault_id)
+        return {
+            "expenses": [
+                {
+                    "id": 101,
+                    "date": "2026-07-10",
+                    "paid_by_id": 4,
+                    "paid_by": "Karuna",
+                    "amount": 1200,
+                    "category": "Food",
+                    "category_icon": "restaurant",
+                    "split_label": "50/50"
+                },
+                {
+                    "id": 102,
+                    "date": "2026-07-09",
+                    "paid_by_id": 5,
+                    "paid_by": "Aman",
+                    "amount": 800,
+                    "category": "Groceries",
+                    "category_icon": "cart",
+                    "split_label": "50/50"
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        "api.shared.get_shared_expenses_page_data",
+        fake_expenses
+    )
+    monkeypatch.setattr(
+        "api.shared.get_shared_vault_summary",
+        lambda shared_vault_id, start_date, end_date: {
+            "participants": [
+                {"vault_id": 4, "name": "Karuna", "paid": 1200, "share": 1000, "balance": 200},
+                {"vault_id": 5, "name": "Aman", "paid": 800, "share": 1000, "balance": -200}
+            ],
+            "total_shared_spending": 2000,
+            "settlements": [],
+            "outstanding_settlement": 200,
+            "top_payer": None
+        }
+    )
+    monkeypatch.setattr(
+        "api.shared.get_shared_bills_summary",
+        lambda shared_vault_id: {
+            "due_soon_count": 2,
+            "total_due_soon": 500,
+            "upcoming_bills": [],
+            "total_active_bills": 3
+        }
+    )
+    monkeypatch.setattr(
+        "api.shared.get_shared_category_spending",
+        lambda shared_vault_id, start_date, end_date: [
+            ("restaurant", "Food", 1200),
+            ("cart", "Groceries", 800)
+        ]
+    )
+    monkeypatch.setattr(
+        "api.shared.settlement_summary_with_accounts",
+        lambda vault_id: {
+            "label": "Owed to You:",
+            "amount": 200,
+            "direction": "receivable",
+            "receivable": 200,
+            "payable": 0,
+            "net": 200,
+            "items": [
+                {
+                    "shared_vault_id": 40,
+                    "from_vault_id": 5,
+                    "to_vault_id": 4,
+                    "from_accounts": [],
+                    "to_accounts": [],
+                    "amount": 200
+                }
+            ]
+        }
+    )
+
+    response = client.get(
+        "/api/shared/dashboard?sharedVaultId=40",
+        headers=auth_header()
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["vault"] == {
+        "id": "40",
+        "name": "Home",
+        "isAdmin": False,
+        "vaultType": "Shared"
+    }
+    data = payload["data"]
+    assert data["settlement"]["currentUserIsOwed"] == 200
+    assert data["settlement"]["currentUserOwes"] == 0
+    assert data["settlement"]["settlementPercentage"] == 120
+    assert data["householdSnapshot"] == {
+        "householdSpendThisMonth": 2000.0,
+        "upcomingBillsCount": 2,
+        "participantCount": 2,
+        "topCategory": "Food",
+        "topCategoryPercentage": 60,
+        "topCategoryAmount": 1200.0
+    }
+    assert data["recentActivity"] == [
+        {
+            "id": 101,
+            "participant": "Karuna",
+            "category": "Food",
+            "amount": 1200,
+            "date": "2026-07-10",
+            "time": None,
+            "direction": "paid",
+            "sharedTag": "50/50",
+            "icon": "restaurant"
+        },
+        {
+            "id": 102,
+            "participant": "Aman",
+            "category": "Groceries",
+            "amount": 800,
+            "date": "2026-07-09",
+            "time": None,
+            "direction": "owed",
+            "sharedTag": "50/50",
+            "icon": "cart"
+        }
+    ]
+    assert data["participants"][0] == {
+        "vaultId": 4,
+        "name": "Karuna",
+        "avatarInitial": "K",
+        "paid": 1200,
+        "share": 1000,
+        "balance": 200,
+        "positiveBalance": 200.0,
+        "negativeBalance": 0,
+        "isCurrentUser": True
+    }
+    assert data["spendingChart"][0] == {
+        "key": "category:food",
+        "category": "Food",
+        "amount": 1200.0,
+        "percentage": 60,
+        "icon": "restaurant"
+    }
+    assert data["monthlySummary"] == {
+        "monthlySpend": 2000.0,
+        "dailyAverage": 200.0,
+        "projection": 6200.0
+    }
+    assert data["quickActions"] == {
+        "canAddExpense": True,
+        "canSplit": True,
+        "canAddBill": True,
+        "markSettledVisible": True,
+        "markSettledEnabled": True
+    }
+    assert observed["expenses"] == (40, "2026-07-01", "2026-07-31", None, None)
+
 def test_shared_bills_wraps_legacy_page_data(monkeypatch):
     client = build_client(monkeypatch)
     observed = {}

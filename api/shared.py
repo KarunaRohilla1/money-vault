@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -30,13 +31,16 @@ from db.shared_bills import (
     close_cycle,
     duplicate_shared_bill,
     get_shared_bills_page_data,
+    get_shared_bills_summary,
     mark_bill_paid,
     skip_bill_instance,
     update_shared_bill
 )
 from db.shared_expenses import (
     get_settlement_summary,
+    get_shared_category_spending,
     get_shared_expenses_page_data,
+    get_shared_vault_summary,
     settle_outstanding_settlement
 )
 from db.vaults import get_connected_shared_vaults, get_vault_by_id
@@ -113,6 +117,202 @@ def shared_vault_id_for_bill(bill_id):
     return int(row[0])
 
 
+
+def current_personal_vault_id(vault):
+    if vault.vault_type == "Shared" and vault.authenticated_vault_id:
+        return int(vault.authenticated_vault_id)
+    return int_vault_id(vault)
+
+
+def safe_percent(amount, total):
+    total = float(total or 0)
+    if total <= 0:
+        return 0
+    return round(float(amount or 0) / total * 100)
+
+
+def stable_key(value):
+    key = "".join(
+        char.lower() if char.isalnum() else "-"
+        for char in str(value or "uncategorized")
+    ).strip("-")
+    return key or "uncategorized"
+
+
+def participant_initial(name):
+    return (name or "?").strip()[:1].upper() or "?"
+
+
+def adapt_shared_dashboard_cycle(cycle):
+    return {
+        "id": cycle.id,
+        "startDate": cycle.start_iso,
+        "endDate": cycle.end_iso,
+        "displayName": cycle.display_name,
+        "status": cycle.status,
+        "daysCompleted": cycle.days_completed,
+        "daysRemaining": cycle.days_remaining,
+        "totalDays": cycle.total_days,
+        "progressPercent": cycle.progress_percent
+    }
+
+
+def adapt_shared_dashboard_vault(shared_vault_id):
+    row = get_vault_by_id(shared_vault_id)
+    if not row:
+        raise bad_request("Shared vault not found.")
+    return {
+        "id": str(row[0]),
+        "name": row[1],
+        "isAdmin": bool(row[3]),
+        "vaultType": row[4]
+    }
+
+
+def build_shared_dashboard_payload(vault, shared_vault_id):
+    personal_vault_id = current_personal_vault_id(vault)
+    cycle = get_current_cycle(shared_vault_id)
+    start_date = cycle.start_iso
+    end_date = cycle.end_iso
+    expenses = get_shared_expenses_page_data(
+        shared_vault_id,
+        start_date,
+        end_date
+    )
+    shared_summary = get_shared_vault_summary(
+        shared_vault_id,
+        start_date,
+        end_date
+    )
+    bill_summary = get_shared_bills_summary(shared_vault_id)
+    category_rows = get_shared_category_spending(
+        shared_vault_id,
+        start_date,
+        end_date
+    )
+    settlement = settlement_summary_with_accounts(
+        personal_vault_id
+    )
+    participants = shared_summary["participants"]
+    current_participant = next(
+        (
+            item
+            for item in participants
+            if int(item["vault_id"]) == personal_vault_id
+        ),
+        None
+    )
+    total_spend = float(shared_summary["total_shared_spending"] or 0)
+    top_category_row = category_rows[0] if category_rows else None
+    top_category_amount = float(top_category_row[2]) if top_category_row else 0
+    daily_average = round(
+        total_spend / max(cycle.days_completed, 1),
+        2
+    )
+    projection = round(
+        daily_average * cycle.total_days,
+        2
+    )
+    current_paid = float(current_participant["paid"] if current_participant else 0)
+    current_share = float(current_participant["share"] if current_participant else 0)
+    current_balance = float(current_participant["balance"] if current_participant else 0)
+
+    spending_chart = []
+    for row in category_rows:
+        amount = float(row[2] or 0)
+        name = row[1] or "Uncategorized"
+        spending_chart.append({
+            "key": f"category:{stable_key(name)}",
+            "category": name,
+            "amount": amount,
+            "percentage": safe_percent(amount, total_spend),
+            "icon": row[0]
+        })
+
+    recent_activity = []
+    for expense in expenses["expenses"][:5]:
+        paid_by_current = int(expense["paid_by_id"]) == personal_vault_id
+        recent_activity.append({
+            "id": expense["id"],
+            "participant": expense["paid_by"],
+            "category": expense["category"],
+            "amount": expense["amount"],
+            "date": expense["date"],
+            "time": None,
+            "direction": "paid" if paid_by_current else "owed",
+            "sharedTag": expense["split_label"],
+            "icon": expense["category_icon"]
+        })
+
+    participant_summaries = [
+        {
+            "vaultId": item["vault_id"],
+            "name": item["name"],
+            "avatarInitial": participant_initial(item["name"]),
+            "paid": item["paid"],
+            "share": item["share"],
+            "balance": item["balance"],
+            "positiveBalance": max(float(item["balance"]), 0),
+            "negativeBalance": max(-float(item["balance"]), 0),
+            "isCurrentUser": int(item["vault_id"]) == personal_vault_id
+        }
+        for item in participants
+    ]
+
+    settlement_amount = abs(current_balance)
+    return {
+        "generatedAt": datetime.now(UTC).isoformat(),
+        "vault": adapt_shared_dashboard_vault(shared_vault_id),
+        "data": {
+            "cycle": adapt_shared_dashboard_cycle(cycle),
+            "settlement": {
+                "currentUserOwes": max(-current_balance, 0),
+                "currentUserIsOwed": max(current_balance, 0),
+                "currentUserPaid": current_paid,
+                "currentUserShare": current_share,
+                "settlementPercentage": safe_percent(current_paid, current_share) if current_share > 0 else 100,
+                "amount": settlement_amount,
+                "label": "All settled" if settlement_amount == 0 else ("You owe" if current_balance < 0 else "You are owed"),
+                "direction": "settled" if settlement_amount == 0 else ("payable" if current_balance < 0 else "receivable"),
+                "items": [
+                    item
+                    for item in settlement["items"]
+                    if int(item["shared_vault_id"]) == int(shared_vault_id)
+                ]
+            },
+            "householdSnapshot": {
+                "householdSpendThisMonth": total_spend,
+                "upcomingBillsCount": bill_summary["due_soon_count"],
+                "participantCount": len(participants),
+                "topCategory": top_category_row[1] if top_category_row else None,
+                "topCategoryPercentage": safe_percent(top_category_amount, total_spend),
+                "topCategoryAmount": top_category_amount
+            },
+            "recentActivity": recent_activity,
+            "participants": participant_summaries,
+            "spendingChart": spending_chart,
+            "monthlySummary": {
+                "monthlySpend": total_spend,
+                "dailyAverage": daily_average,
+                "projection": projection
+            },
+            "quickActions": {
+                "canAddExpense": True,
+                "canSplit": True,
+                "canAddBill": True,
+                "markSettledVisible": settlement_amount > 0,
+                "markSettledEnabled": settlement_amount > 0
+            },
+            "emptyStates": {
+                "noSharedTransactions": len(expenses["expenses"]) == 0,
+                "noParticipants": len(participants) == 0,
+                "noSpending": total_spend == 0,
+                "noCategories": len(spending_chart) == 0,
+                "noBills": bill_summary["due_soon_count"] == 0
+            }
+        }
+    }
+
 def adapt_settlement_account(row):
     return {
         "balance": float(row[5]) if len(row) > 5 and row[5] is not None else None,
@@ -150,6 +350,22 @@ def settlement_summary_with_accounts(vault_id):
         "items": items
     }
 
+
+@router.get("/dashboard", response_model=SharedPageResponse, response_model_by_alias=True)
+def shared_dashboard(
+    shared_vault_id: Optional[int] = Query(default=None, alias="sharedVaultId"),
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    selected_id = resolve_shared_vault_id(
+        int_vault_id(vault),
+        shared_vault_id
+    )
+    return SharedPageResponse(
+        data=build_shared_dashboard_payload(
+            vault,
+            selected_id
+        )
+    )
 
 @router.get("/expenses", response_model=SharedPageResponse, response_model_by_alias=True)
 def shared_expenses(
