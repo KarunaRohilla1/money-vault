@@ -27,6 +27,7 @@ from db.transactions import (
     get_transaction_by_id,
     update_transaction
 )
+from db.vaults import get_shared_vault_participants
 
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -36,6 +37,31 @@ def transaction_origin_vault_id(vault):
     if vault.vault_type == "Shared" and vault.authenticated_vault_id:
         return int(vault.authenticated_vault_id)
     return int_vault_id(vault)
+
+
+def normalize_allocation_keys(allocations):
+    if not allocations:
+        return allocations
+
+    return {
+        int(participant_vault_id): value
+        for participant_vault_id, value in allocations.items()
+    }
+
+
+def participant_rows_for_request(participant_vault_ids, beneficiary_vault_id):
+    if not participant_vault_ids:
+        return []
+
+    participant_map = {
+        int(participant[0]): participant
+        for participant in get_shared_vault_participants(beneficiary_vault_id)
+    }
+
+    return [
+        participant_map.get(int(participant_vault_id), (int(participant_vault_id), ""))
+        for participant_vault_id in participant_vault_ids
+    ]
 
 
 def validate_shared_transaction_request(request, vault, origin_vault_id):
@@ -147,6 +173,11 @@ def create_transaction(
         vault_id
     )
 
+    participant_vaults = participant_rows_for_request(
+        request.participant_vaults,
+        beneficiary_vault_id
+    )
+
     try:
         transaction_id = add_transaction(
             vault_id,
@@ -158,9 +189,9 @@ def create_transaction(
             request.notes,
             beneficiary_vault_id=beneficiary_vault_id,
             allocation_method=request.allocation_method,
-            participant_vaults=request.participant_vaults,
-            percentage_allocations=request.percentage_allocations,
-            amount_allocations=request.amount_allocations
+            participant_vaults=participant_vaults,
+            percentage_allocations=normalize_allocation_keys(request.percentage_allocations),
+            amount_allocations=normalize_allocation_keys(request.amount_allocations)
         )
     except ValueError as error:
         raise bad_request(str(error)) from error
@@ -193,6 +224,11 @@ def update_transaction_route(
         vault_id
     )
 
+    participant_vaults = participant_rows_for_request(
+        request.participant_vaults,
+        beneficiary_vault_id
+    )
+
     try:
         update_transaction(
             transaction_id,
@@ -205,9 +241,9 @@ def update_transaction_route(
             vault_id=vault_id,
             beneficiary_vault_id=beneficiary_vault_id,
             allocation_method=request.allocation_method,
-            participant_vaults=request.participant_vaults,
-            percentage_allocations=request.percentage_allocations,
-            amount_allocations=request.amount_allocations
+            participant_vaults=participant_vaults,
+            percentage_allocations=normalize_allocation_keys(request.percentage_allocations),
+            amount_allocations=normalize_allocation_keys(request.amount_allocations)
         )
     except ValueError as error:
         raise bad_request(str(error)) from error

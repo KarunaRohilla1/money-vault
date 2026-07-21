@@ -97,8 +97,17 @@ def test_shared_transaction_validates_shared_vault_and_participants(monkeypatch)
         )
     )
     monkeypatch.setattr(
+        "api.transactions.get_shared_vault_participants",
+        lambda shared_vault_id: [(4, "Karuna"), (5, "Asfar")]
+    )
+
+    def fake_add_transaction(*args, **kwargs):
+        observed["participant_vaults"] = kwargs["participant_vaults"]
+        return 99
+
+    monkeypatch.setattr(
         "api.transactions.add_transaction",
-        lambda *args, **kwargs: 99
+        fake_add_transaction
     )
     monkeypatch.setattr(
         "api.transactions.get_transaction_by_id",
@@ -118,6 +127,7 @@ def test_shared_transaction_validates_shared_vault_and_participants(monkeypatch)
             (5, 40)
         ],
         "shared_vault_id": 40,
+        "participant_vaults": [(4, "Karuna"), (5, "Asfar")],
         "vault_id": 4
     }
     assert response.json()["beneficiaryVaultId"] == 40
@@ -173,8 +183,13 @@ def test_active_shared_vault_transaction_uses_authenticated_personal_vault(monke
     def fake_add_transaction(vault_id, *args, **kwargs):
         observed["created_vault_id"] = vault_id
         observed["beneficiary_vault_id"] = kwargs["beneficiary_vault_id"]
+        observed["participant_vaults"] = kwargs["participant_vaults"]
         return 101
 
+    monkeypatch.setattr(
+        "api.transactions.get_shared_vault_participants",
+        lambda shared_vault_id: [(4, "Karuna"), (5, "Asfar")]
+    )
     monkeypatch.setattr("api.transactions.add_transaction", fake_add_transaction)
     monkeypatch.setattr(
         "api.transactions.get_transaction_by_id",
@@ -194,6 +209,7 @@ def test_active_shared_vault_transaction_uses_authenticated_personal_vault(monke
         "beneficiary_vault_id": 40,
         "category_vault_id": 4,
         "created_vault_id": 4,
+        "participant_vaults": [(4, "Karuna"), (5, "Asfar")],
         "participants": [
             (4, 40),
             (5, 40)
@@ -201,3 +217,51 @@ def test_active_shared_vault_transaction_uses_authenticated_personal_vault(monke
         "shared_vault_id": 40
     }
     assert response.json()["beneficiaryVaultId"] == 40
+
+
+
+def test_shared_transaction_normalizes_allocation_keys_for_legacy_split_helpers(monkeypatch):
+    client = build_client(monkeypatch)
+    observed = {
+        "participants": []
+    }
+
+    monkeypatch.setattr("api.transactions.require_account", lambda account_id, vault_id: None)
+    monkeypatch.setattr("api.transactions.require_category", lambda category_id, vault_id: None)
+    monkeypatch.setattr("api.transactions.require_shared_vault", lambda shared_vault_id, vault_id: None)
+    monkeypatch.setattr(
+        "api.transactions.require_shared_participant",
+        lambda participant_vault_id, shared_vault_id: observed["participants"].append((participant_vault_id, shared_vault_id))
+    )
+    monkeypatch.setattr(
+        "api.transactions.get_shared_vault_participants",
+        lambda shared_vault_id: [(4, "Karuna"), (5, "Asfar")]
+    )
+
+    def fake_add_transaction(*args, **kwargs):
+        observed["participant_vaults"] = kwargs["participant_vaults"]
+        observed["percentage_allocations"] = kwargs["percentage_allocations"]
+        observed["amount_allocations"] = kwargs["amount_allocations"]
+        return 102
+
+    monkeypatch.setattr("api.transactions.add_transaction", fake_add_transaction)
+    monkeypatch.setattr(
+        "api.transactions.get_transaction_by_id",
+        lambda transaction_id: (transaction_id, 1, 2, "2026-07-17", 1200, "Expense", "Shared dinner", 40, "Percentage")
+    )
+
+    response = client.post(
+        "/api/transactions",
+        headers=auth_header(),
+        json={
+            **shared_payload(participants=[4, 5]),
+            "allocationMethod": "Percentage",
+            "percentageAllocations": {"4": 60, "5": 40},
+            "amountAllocations": {"4": 720, "5": 480}
+        }
+    )
+
+    assert response.status_code == 200
+    assert observed["participant_vaults"] == [(4, "Karuna"), (5, "Asfar")]
+    assert observed["percentage_allocations"] == {4: 60, 5: 40}
+    assert observed["amount_allocations"] == {4: 720, 5: 480}
