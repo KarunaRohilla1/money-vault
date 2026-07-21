@@ -48,6 +48,12 @@ def validate_account_payload(request):
         raise bad_request("Opening balance cannot be negative.")
 
 
+def effective_account_vault_id(vault):
+    if vault.vault_type == "Shared" and vault.authenticated_vault_id:
+        return int(vault.authenticated_vault_id)
+    return int_vault_id(vault)
+
+
 def account_exists_for_vault(account_id, vault_id):
     row = get_account_by_id(account_id)
     return bool(row and int(row[5]) == int(vault_id))
@@ -68,13 +74,13 @@ def adapt_account(row):
 def list_accounts(vault: VaultContext = Depends(get_authenticated_vault)):
     return [
         adapt_account(row)
-        for row in get_accounts_with_balances(int_vault_id(vault))
+        for row in get_accounts_with_balances(effective_account_vault_id(vault))
     ]
 
 
 @router.get("/{account_id}", response_model=AccountResponse, response_model_by_alias=True)
 def account_detail(account_id: int, vault: VaultContext = Depends(get_authenticated_vault)):
-    vault_id = int_vault_id(vault)
+    vault_id = effective_account_vault_id(vault)
     require_account(
         account_id,
         vault_id
@@ -109,7 +115,7 @@ def update_account_route(
     request: AccountUpdateRequest,
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
-    vault_id = int_vault_id(vault)
+    vault_id = effective_account_vault_id(vault)
     require_account(
         account_id,
         vault_id

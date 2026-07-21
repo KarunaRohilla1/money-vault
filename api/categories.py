@@ -21,6 +21,12 @@ from db.categories import (
 router = APIRouter(prefix="/api/categories", tags=["categories"])
 
 
+def effective_category_vault_id(vault):
+    if vault.vault_type == "Shared" and vault.authenticated_vault_id:
+        return int(vault.authenticated_vault_id)
+    return int_vault_id(vault)
+
+
 def adapt_category(row, include_count=False):
     return CategoryResponse(
         id=int(row[0]),
@@ -37,7 +43,7 @@ def adapt_category(row, include_count=False):
 def list_categories(vault: VaultContext = Depends(get_authenticated_vault)):
     return [
         adapt_category(row)
-        for row in get_categories(int_vault_id(vault))
+        for row in get_categories(effective_category_vault_id(vault))
     ]
 
 

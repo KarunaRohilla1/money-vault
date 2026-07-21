@@ -32,14 +32,25 @@ from db.transactions import (
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
 
-def validate_shared_transaction_request(request, vault_id):
-    beneficiary_vault_id = request.beneficiary_vault_id or vault_id
-    if int(beneficiary_vault_id) == int(vault_id):
+def transaction_origin_vault_id(vault):
+    if vault.vault_type == "Shared" and vault.authenticated_vault_id:
+        return int(vault.authenticated_vault_id)
+    return int_vault_id(vault)
+
+
+def validate_shared_transaction_request(request, vault, origin_vault_id):
+    active_vault_id = int_vault_id(vault)
+    beneficiary_vault_id = request.beneficiary_vault_id or active_vault_id
+
+    if vault.vault_type == "Shared":
+        if int(beneficiary_vault_id) != active_vault_id:
+            raise bad_request("Shared vault transactions must use the active shared vault.")
+    elif int(beneficiary_vault_id) == origin_vault_id:
         return beneficiary_vault_id
 
     require_shared_vault(
         beneficiary_vault_id,
-        vault_id
+        origin_vault_id
     )
 
     for participant_vault_id in request.participant_vaults or []:
@@ -48,7 +59,7 @@ def validate_shared_transaction_request(request, vault_id):
             beneficiary_vault_id
         )
 
-    if vault_id not in (request.participant_vaults or []):
+    if origin_vault_id not in (request.participant_vaults or []):
         raise bad_request("Shared transactions must include the authenticated vault as a participant.")
 
     return beneficiary_vault_id
@@ -121,9 +132,10 @@ def create_transaction(
     request: TransactionCreateRequest,
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
-    vault_id = int_vault_id(vault)
+    vault_id = transaction_origin_vault_id(vault)
     beneficiary_vault_id = validate_shared_transaction_request(
         request,
+        vault,
         vault_id
     )
     require_account(
@@ -162,7 +174,7 @@ def update_transaction_route(
     request: TransactionUpdateRequest,
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
-    vault_id = int_vault_id(vault)
+    vault_id = transaction_origin_vault_id(vault)
     require_transaction(
         transaction_id,
         vault_id
@@ -177,6 +189,7 @@ def update_transaction_route(
     )
     beneficiary_vault_id = validate_shared_transaction_request(
         request,
+        vault,
         vault_id
     )
 
