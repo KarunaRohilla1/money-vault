@@ -36,7 +36,7 @@ class SharedVaultActivationRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     shared_vault_id: int = Field(alias="sharedVaultId")
-    pin: str = Field(min_length=1)
+    pin: Optional[str] = Field(default=None, min_length=1)
 
 
 class FinancialCycleResponse(BaseModel):
@@ -175,6 +175,54 @@ class TransactionResponse(BaseModel):
     transfer_group_id: Optional[str] = Field(default=None, alias="transferGroupId")
 
 
+class TransactionTransferMetadataResponse(BaseModel):
+    from_account: Optional[str] = Field(default=None, alias="fromAccount")
+    to_account: Optional[str] = Field(default=None, alias="toAccount")
+    from_running_balance: Optional[float] = Field(default=None, alias="fromRunningBalance")
+    to_running_balance: Optional[float] = Field(default=None, alias="toRunningBalance")
+
+
+class TransactionHistoryItemResponse(BaseModel):
+    id: str
+    transaction_id: Optional[int] = Field(default=None, alias="transactionId")
+    type: Literal["expense", "income", "transfer"]
+    transaction_type: str = Field(alias="transactionType")
+    title: str
+    merchant: Optional[str] = None
+    category: str
+    category_icon: str = Field(alias="categoryIcon")
+    account: Optional[str] = None
+    amount: float
+    direction: Literal["credit", "debit", "neutral"]
+    date: str
+    time: Optional[str] = None
+    running_balance: Optional[float] = Field(default=None, alias="runningBalance")
+    shared: bool
+    shared_vault_name: Optional[str] = Field(default=None, alias="sharedVaultName")
+    transfer_group_id: Optional[str] = Field(default=None, alias="transferGroupId")
+    transfer_metadata: Optional[TransactionTransferMetadataResponse] = Field(default=None, alias="transferMetadata")
+
+
+class TransactionHistorySectionResponse(BaseModel):
+    date: str
+    label: str
+    summary: str
+    spent: float
+    received: float
+    transactions: List[TransactionHistoryItemResponse]
+
+
+class TransactionHistoryResponse(BaseModel):
+    month: Optional[str] = None
+    transaction_count: int = Field(alias="transactionCount")
+    sections: List[TransactionHistorySectionResponse]
+
+
+class TransactionMonthRangeResponse(BaseModel):
+    oldest_month: str = Field(alias="oldestMonth")
+    latest_month: str = Field(alias="latestMonth")
+
+
 class TransactionDetailResponse(BaseModel):
     id: int
     account_id: int = Field(alias="accountId")
@@ -185,6 +233,14 @@ class TransactionDetailResponse(BaseModel):
     notes: Optional[str] = None
     beneficiary_vault_id: Optional[int] = Field(default=None, alias="beneficiaryVaultId")
     allocation_method: Optional[str] = Field(default=None, alias="allocationMethod")
+    account_name: Optional[str] = Field(default=None, alias="accountName")
+    category_name: Optional[str] = Field(default=None, alias="categoryName")
+    category_icon: Optional[str] = Field(default=None, alias="categoryIcon")
+    shared: bool = False
+    shared_vault_name: Optional[str] = Field(default=None, alias="sharedVaultName")
+    transfer_group_id: Optional[str] = Field(default=None, alias="transferGroupId")
+    created_at: Optional[str] = Field(default=None, alias="createdAt")
+    updated_at: Optional[str] = Field(default=None, alias="updatedAt")
 
 
 class TransactionCreateRequest(BaseModel):
@@ -362,12 +418,72 @@ class WishlistItemRequest(BaseModel):
     target_date: Optional[str] = Field(default=None, alias="targetDate")
 
 
-class ReportsResponse(BaseModel):
-    category_breakdown: List[Dict[str, Any]] = Field(alias="categoryBreakdown")
-    generated_at: datetime = Field(alias="generatedAt")
-    monthly_trend: List[Dict[str, Any]] = Field(alias="monthlyTrend")
-    period: Dict[str, Any]
+class ReportCycleOption(BaseModel):
+    key: str
+    label: str
+    start_date: str = Field(alias="startDate")
+    end_date: str = Field(alias="endDate")
+    status: str
+
+
+class ReportFilters(BaseModel):
+    period: Literal["cycle"] = "cycle"
+    cycle_start: str = Field(alias="cycleStart")
+    start_date: str = Field(alias="startDate")
+    end_date: str = Field(alias="endDate")
+
+
+class ReportMoneyCard(BaseModel):
+    key: str
+    title: str
+    value: float | str
+    caption: str
+    tone: str
+    format: Literal["money", "text", "count"] = "money"
+
+
+class ReportReviewItem(BaseModel):
+    key: str
+    label: str
+    value: float | int | str | None
+    format: Literal["money", "text", "count"] = "text"
+
+
+class ReportCategoryItem(BaseModel):
+    key: str
+    icon: str
+    name: str
+    amount: float
+    percent: int
+
+
+class ReportTrendItem(BaseModel):
+    cycle: str
+    cash_outflow: float = Field(alias="cashOutflow")
+    net_personal_cost: float = Field(alias="netPersonalCost")
+    household_spending: float = Field(alias="householdSpending")
+    income: float
+    savings: float
+
+
+class ReportsData(BaseModel):
     summary: Dict[str, Any]
+    overview: List[ReportMoneyCard]
+    monthly_review: List[ReportReviewItem] = Field(alias="monthlyReview")
+    monthly_summary: List[ReportReviewItem] = Field(alias="monthlySummary")
+    shared_insights: List[ReportReviewItem] = Field(alias="sharedInsights")
+    cash_outflow_by_category: List[ReportCategoryItem] = Field(alias="cashOutflowByCategory")
+    net_personal_cost_by_category: List[ReportCategoryItem] = Field(alias="netPersonalCostByCategory")
+    trend: List[ReportTrendItem]
+    natural_language_result: Optional[str] = Field(default=None, alias="naturalLanguageResult")
+
+
+class ReportsResponse(BaseModel):
+    generated_at: datetime = Field(alias="generatedAt")
+    vault: VaultContext
+    filters: ReportFilters
+    cycle_options: List[ReportCycleOption] = Field(alias="cycleOptions")
+    data: ReportsData
 
 
 class VaultSummaryResponse(BaseModel):

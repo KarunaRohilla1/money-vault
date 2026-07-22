@@ -505,17 +505,30 @@ def get_transaction_by_id(transaction_id):
         transaction = conn.execute(
             """
             SELECT
-                id,
-                account_id,
-                category_id,
-                date,
-                amount,
-                transaction_type,
-                notes,
-                beneficiary_vault_id,
-                allocation_method
-            FROM transactions
-            WHERE id = ?
+                t.id,
+                t.account_id,
+                t.category_id,
+                t.date,
+                t.amount,
+                t.transaction_type,
+                t.notes,
+                t.beneficiary_vault_id,
+                t.allocation_method,
+                a.name,
+                c.name,
+                c.emoji,
+                shared_vault.name,
+                t.transfer_group_id
+            FROM transactions t
+            LEFT JOIN accounts a
+                ON t.account_id = a.id
+            LEFT JOIN categories c
+                ON t.category_id = c.id
+            LEFT JOIN vaults shared_vault
+                ON shared_vault.id = COALESCE(t.beneficiary_vault_id, t.vault_id)
+                AND shared_vault.id <> t.vault_id
+                AND shared_vault.vault_type = 'Shared'
+            WHERE t.id = ?
             """,
             (transaction_id,)
         ).fetchone()
@@ -731,5 +744,190 @@ def update_transaction(
             "transfers"
         ))
 
+    finally:
+        conn.close()
+
+
+@cache_data(ttl=60)
+def get_transaction_history(
+    vault_id,
+    month=None,
+    category=None,
+    account=None,
+    search=None,
+    transaction_type="All",
+    sort_by="Newest",
+    date_from=None,
+    date_to=None,
+    shared_only=False,
+    amount_min=None,
+    amount_max=None
+):
+    conn = get_connection()
+    try:
+        query = """
+        WITH ledger AS (
+            SELECT
+                t.id,
+                t.vault_id,
+                t.account_id,
+                t.date,
+                t.amount,
+                t.transaction_type,
+                t.notes,
+                t.transfer_group_id,
+                COALESCE(t.beneficiary_vault_id, t.vault_id) AS beneficiary_vault_id,
+                a.name AS account_name,
+                a.opening_balance,
+                COALESCE(c.name, t.transaction_type) AS category_name,
+                COALESCE(c.emoji, '') AS category_icon,
+                shared_vault.name AS shared_vault_name,
+                a.opening_balance + SUM(
+                    CASE
+                        WHEN t.transaction_type IN ('Income', 'Transfer In') THEN t.amount
+                        WHEN t.transaction_type IN ('Expense', 'Transfer Out') THEN -t.amount
+                        ELSE 0
+                    END
+                ) OVER (
+                    PARTITION BY t.account_id
+                    ORDER BY t.date::date ASC, t.id ASC
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS running_balance
+            FROM transactions t
+            LEFT JOIN accounts a
+                ON t.account_id = a.id
+            LEFT JOIN categories c
+                ON t.category_id = c.id
+            LEFT JOIN vaults shared_vault
+                ON shared_vault.id = COALESCE(t.beneficiary_vault_id, t.vault_id)
+                AND shared_vault.id <> t.vault_id
+                AND shared_vault.vault_type = 'Shared'
+            WHERE t.vault_id = ?
+            AND t.is_deleted = 0
+        """
+        params = [vault_id]
+
+        if date_from and date_to:
+            query += """
+            AND t.date::date BETWEEN ? AND ?
+            """
+            params.extend([date_from, date_to])
+        elif month:
+            query += """
+            AND to_char(t.date::date, 'YYYY-MM') = ?
+            """
+            params.append(month)
+
+        if category and category != "All":
+            query += """
+            AND c.name = ?
+            """
+            params.append(category)
+
+        if account and account != "All":
+            query += """
+            AND a.name = ?
+            """
+            params.append(account)
+
+        if shared_only:
+            query += """
+            AND COALESCE(t.beneficiary_vault_id, t.vault_id) <> t.vault_id
+            """
+
+        if amount_min is not None:
+            query += """
+            AND t.amount >= ?
+            """
+            params.append(amount_min)
+
+        if amount_max is not None:
+            query += """
+            AND t.amount <= ?
+            """
+            params.append(amount_max)
+
+        if transaction_type == "Income":
+            query += """
+            AND t.transaction_type = 'Income'
+            """
+        elif transaction_type == "Expense":
+            query += """
+            AND t.transaction_type = 'Expense'
+            """
+        elif transaction_type == "Transfer":
+            query += """
+            AND t.transaction_type IN ('Transfer In', 'Transfer Out')
+            """
+
+        if search:
+            query += """
+            AND (
+                LOWER(COALESCE(t.notes,'')) LIKE ?
+                OR LOWER(COALESCE(c.name,'')) LIKE ?
+                OR LOWER(COALESCE(a.name,'')) LIKE ?
+                OR LOWER(COALESCE(t.transaction_type,'')) LIKE ?
+                OR CAST(t.amount AS TEXT) LIKE ?
+            )
+            """
+            search_term = f"%{search.lower()}%"
+            params.extend([search_term, search_term, search_term, search_term, search_term])
+
+        query += """
+        )
+        SELECT
+            id,
+            date::text,
+            account_name,
+            category_name,
+            category_icon,
+            amount,
+            transaction_type,
+            notes,
+            transfer_group_id,
+            running_balance,
+            shared_vault_name,
+            account_id
+        FROM ledger
+        """
+
+        if sort_by == "Oldest":
+            query += """
+            ORDER BY date::date ASC, id ASC
+            """
+        elif sort_by == "Amount High":
+            query += """
+            ORDER BY amount DESC, date::date DESC, id DESC
+            """
+        elif sort_by == "Amount Low":
+            query += """
+            ORDER BY amount ASC, date::date DESC, id DESC
+            """
+        else:
+            query += """
+            ORDER BY date::date DESC, id DESC
+            """
+
+        return conn.execute(query, params).fetchall()
+    finally:
+        conn.close()
+
+
+@cache_data(ttl=60)
+def get_transaction_month_range(vault_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                COALESCE(MIN(to_char(date::date, 'YYYY-MM')), to_char(CURRENT_DATE, 'YYYY-MM')),
+                COALESCE(MAX(to_char(date::date, 'YYYY-MM')), to_char(CURRENT_DATE, 'YYYY-MM'))
+            FROM transactions
+            WHERE vault_id = ?
+            AND is_deleted = 0
+            """,
+            (vault_id,)
+        ).fetchone()
+        return row
     finally:
         conn.close()

@@ -265,3 +265,141 @@ def test_shared_transaction_normalizes_allocation_keys_for_legacy_split_helpers(
     assert observed["participant_vaults"] == [(4, "Karuna"), (5, "Asfar")]
     assert observed["percentage_allocations"] == {4: 60, 5: 40}
     assert observed["amount_allocations"] == {4: 720, 5: 480}
+
+
+
+def history_rows():
+    return [
+        (4, "2026-07-10", "HDFC Salary A/c", "Food & Dining", "coffee", 220, "Expense", "Starbucks Coffee", None, 42880, None, 1),
+        (3, "2026-07-10", "HDFC Salary A/c", "Dining Out", "utensils", 670, "Expense", "Domino's Pizza", None, 43100, "Household", 1),
+        (2, "2026-07-09", "HDFC Salary A/c", "Income", "briefcase", 45000, "Income", "Salary", None, 43770, None, 1),
+        (10, "2026-07-08", "HDFC Salary A/c", "Transfer Out", "", 2500, "Transfer Out", "Savings", "transfer-1", 5120, None, 1),
+        (11, "2026-07-08", "Savings A/c", "Transfer In", "", 2500, "Transfer In", "Savings", "transfer-1", 5680, None, 2)
+    ]
+
+
+def test_transaction_history_forwards_filters_and_groups_sections(monkeypatch):
+    client = build_client(monkeypatch)
+    observed = {}
+
+    def fake_history(vault_id, **kwargs):
+        kwargs["vault_id"] = vault_id
+        observed.update(kwargs)
+        return history_rows()
+
+    monkeypatch.setattr("api.transactions.get_transaction_history", fake_history)
+
+    response = client.get(
+        "/api/transactions?month=2026-07&search=coffee&transactionType=Expense",
+        headers=auth_header()
+    )
+
+    assert response.status_code == 200
+    assert observed["vault_id"] == 4
+    assert observed["month"] == "2026-07"
+    assert observed["search"] == "coffee"
+    assert observed["transaction_type"] == "Expense"
+    payload = response.json()
+    assert payload["month"] == "2026-07"
+    assert payload["transactionCount"] == 4
+    assert payload["sections"][0]["date"] == "2026-07-10"
+    assert payload["sections"][0]["spent"] == 890
+    assert payload["sections"][0]["transactions"][0]["runningBalance"] == 42880
+
+
+def test_transaction_history_collapses_transfer_pairs(monkeypatch):
+    client = build_client(monkeypatch)
+    monkeypatch.setattr("api.transactions.get_transaction_history", lambda vault_id, **kwargs: history_rows())
+
+    response = client.get(
+        "/api/transactions?transactionType=Transfer",
+        headers=auth_header()
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    transfer_items = [
+        item
+        for section in payload["sections"]
+        for item in section["transactions"]
+        if item["type"] == "transfer"
+    ]
+    assert len(transfer_items) == 1
+    assert transfer_items[0]["id"] == "transfer-1"
+    assert transfer_items[0]["transferMetadata"] == {
+        "fromAccount": "HDFC Salary A/c",
+        "toAccount": "Savings A/c",
+        "fromRunningBalance": 5120,
+        "toRunningBalance": 5680
+    }
+
+
+def test_transaction_history_marks_shared_rows(monkeypatch):
+    client = build_client(monkeypatch)
+    monkeypatch.setattr("api.transactions.get_transaction_history", lambda vault_id, **kwargs: history_rows())
+
+    response = client.get("/api/transactions", headers=auth_header())
+
+    assert response.status_code == 200
+    shared_items = [
+        item
+        for section in response.json()["sections"]
+        for item in section["transactions"]
+        if item["shared"]
+    ]
+    assert len(shared_items) == 1
+    assert shared_items[0]["sharedVaultName"] == "Household"
+
+
+
+def test_transaction_month_range_endpoint(monkeypatch):
+    client = build_client(monkeypatch)
+    observed = {}
+
+    def fake_month_range(vault_id):
+        observed["vault_id"] = vault_id
+        return ("2020-01", "2026-07")
+
+    monkeypatch.setattr("api.transactions.get_transaction_month_range", fake_month_range)
+
+    response = client.get("/api/transactions/month-range", headers=auth_header())
+
+    assert response.status_code == 200
+    assert observed["vault_id"] == 4
+    assert response.json() == {
+        "oldestMonth": "2020-01",
+        "latestMonth": "2026-07"
+    }
+
+
+def test_transaction_history_forwards_advanced_filters(monkeypatch):
+    client = build_client(monkeypatch)
+    observed = {}
+
+    def fake_history(vault_id, **kwargs):
+        observed["vault_id"] = vault_id
+        observed.update(kwargs)
+        return []
+
+    monkeypatch.setattr("api.transactions.get_transaction_history", fake_history)
+
+    response = client.get(
+        "/api/transactions?account=HDFC&category=Food&dateFrom=2026-07-01&dateTo=2026-07-31&sharedOnly=true&amountMin=100&amountMax=900&sortBy=Amount+High",
+        headers=auth_header()
+    )
+
+    assert response.status_code == 200
+    assert observed == {
+        "account": "HDFC",
+        "amount_max": 900.0,
+        "amount_min": 100.0,
+        "category": "Food",
+        "date_from": "2026-07-01",
+        "date_to": "2026-07-31",
+        "month": None,
+        "search": None,
+        "shared_only": True,
+        "sort_by": "Amount High",
+        "transaction_type": "All",
+        "vault_id": 4
+    }

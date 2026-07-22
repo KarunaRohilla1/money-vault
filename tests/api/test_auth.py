@@ -355,6 +355,38 @@ def test_shared_vault_activation_requires_correct_shared_pin(monkeypatch):
     assert "hash" not in response.text
 
 
+
+def test_shared_vault_activation_without_pin_for_connected_vault(monkeypatch):
+    client = build_client(monkeypatch)
+    install_vault_lookup(monkeypatch)
+    observed = {"verify_called": False}
+    monkeypatch.setattr(
+        "api.auth.get_connected_shared_vaults",
+        lambda vault_id: [(12, "Shared vault")] if str(vault_id) == "4" else []
+    )
+
+    def fake_verify_pin(_vault_name, _pin):
+        observed["verify_called"] = True
+        return None
+
+    monkeypatch.setattr("api.auth.verify_pin", fake_verify_pin)
+
+    response = client.post(
+        "/api/vaults/shared/activate",
+        headers=auth_header_for(personal_vault()),
+        json={
+            "sharedVaultId": 12
+        }
+    )
+
+    assert response.status_code == 200
+    assert observed["verify_called"] is False
+    body = response.json()
+    assert body["token"]
+    assert body["vault"]["id"] == "12"
+    assert body["vault"]["vaultType"] == "Shared"
+    assert body["authenticatedVault"]["id"] == "4"
+
 def test_shared_vault_activation_rejects_wrong_pin_without_switching(monkeypatch):
     client = build_client(monkeypatch)
     install_vault_lookup(monkeypatch)

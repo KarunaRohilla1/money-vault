@@ -217,13 +217,14 @@ def activate_shared_vault(
     if not target:
         raise forbidden_shared_vault()
 
-    verified = verify_pin(
-        target.name,
-        request.pin
-    )
+    if request.pin:
+        verified = verify_pin(
+            target.name,
+            request.pin
+        )
 
-    if not verified or int(verified[0]) != int(target.id):
-        raise INVALID_CREDENTIALS
+        if not verified or int(verified[0]) != int(target.id):
+            raise INVALID_CREDENTIALS
 
     token, expires_at = create_access_token(target, authenticated)
     return LoginResponse(
