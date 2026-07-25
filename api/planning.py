@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from datetime import date
+
+from fastapi import APIRouter, Body, Depends
 
 from api.dependencies import get_authenticated_vault
 from api.resources import (
@@ -12,6 +14,11 @@ from api.schemas import (
     CommitmentResponse,
     IncomeTemplateResponse,
     PlanningCycleResponse,
+    PlanningActivityResponse,
+    PlanningCloseReadinessResponse,
+    PlanningCloseRequest,
+    PlanningCompletionResponse,
+    PlanningCycleProgressResponse,
     PlanningItemRequest,
     PlanningResponse,
     PlanningStatusRequest,
@@ -20,7 +27,8 @@ from api.schemas import (
     SuccessResponse,
     VaultContext
 )
-from db.financial_cycles import close_active_cycle, get_current_cycle
+from db.financial_cycles import close_active_cycle, derive_cycle_status, get_current_cycle
+from db.core import get_planning_transaction_date
 from db.planning import (
     add_commitment,
     add_income_template,
@@ -30,6 +38,7 @@ from db.planning import (
     get_cycle_planning_summary,
     get_income_templates,
     get_monthly_planning_totals,
+    finalize_month,
     get_planning_activity_statuses,
     save_income_status,
     save_obligation_status,
@@ -99,6 +108,149 @@ def adapt_income_template(row, status):
     )
 
 
+
+
+def activity_icon(kind, name):
+    if kind == "income":
+        return "cash"
+
+    lowered = name.lower()
+    if any(word in lowered for word in ["rent", "mortgage", "home", "house"]):
+        return "home-outline"
+    if any(word in lowered for word in ["electric", "power", "utility", "water", "gas"]):
+        return "lightning-bolt-outline"
+    if any(word in lowered for word in ["card", "credit"]):
+        return "credit-card-outline"
+    if any(word in lowered for word in ["loan", "emi", "debt"]):
+        return "bank-outline"
+    if any(word in lowered for word in ["insurance", "medical", "health"]):
+        return "shield-check-outline"
+    if any(word in lowered for word in ["sip", "mutual", "fund"]):
+        return "chart-line"
+    return "calendar-check-outline"
+
+
+def timeline_label(due_iso, status):
+    due_date = date.fromisoformat(due_iso)
+    today = date.today()
+    diff = (due_date - today).days
+
+    if diff < 0 and status in {"PENDING", "CARRIED_FORWARD"}:
+        return "Overdue"
+    if diff == 0:
+        return "Today"
+    if diff == 1:
+        return "Tomorrow"
+    if diff > 1:
+        return f"in {diff} days"
+    return f"Due day {due_date.day}"
+
+
+def status_label(status, kind):
+    if kind == "income" and status == "RECEIVED":
+        return "Completed"
+    if kind == "commitment" and status == "PAID":
+        return "Completed"
+    if status == "CANCELLED":
+        return "Skipped"
+    if status == "CARRIED_FORWARD":
+        return "Carried Forward"
+    return "Pending"
+
+
+def build_activity(kind, row, status, month, year):
+    status_response = adapt_status(status)
+    complete_status = "RECEIVED" if kind == "income" else "PAID"
+    activity_status = status_response.status
+    expected = row[2]
+    effective_expected = (
+        status_response.actual_amount
+        if status_response.actual_amount is not None and activity_status != "CANCELLED"
+        else expected
+    )
+    actual = (
+        status_response.actual_amount
+        if activity_status == complete_status and status_response.actual_amount is not None
+        else effective_expected
+    )
+    due_iso = get_planning_transaction_date(year, month, row[3])
+
+    return PlanningActivityResponse(
+        accountId=int(row[5]) if row[5] is not None else None,
+        accountName=row[4],
+        actualAmount=number(actual),
+        amount=number(expected),
+        completeLabel="Received" if kind == "income" else "Paid",
+        completeStatus=complete_status,
+        dueDate=due_iso,
+        dueDay=int(row[3]),
+        effectiveExpectedAmount=number(effective_expected),
+        icon=activity_icon(kind, row[1]),
+        id=int(row[0]),
+        kind=kind,
+        name=row[1],
+        status=status_response,
+        statusLabel=status_label(activity_status, kind),
+        timelineLabel=timeline_label(due_iso, activity_status)
+    )
+
+
+def build_cycle_progress(cycle):
+    cycle_start = date.fromisoformat(cycle.start_iso)
+    cycle_end = date.fromisoformat(cycle.end_iso)
+    today = date.today()
+    total_days = max((cycle_end - cycle_start).days + 1, 1)
+
+    if cycle_start <= today <= cycle_end:
+        days_remaining = max((cycle_end - today).days + 1, 0)
+        days_completed = min(max((today - cycle_start).days, 0), total_days)
+    elif today > cycle_end:
+        days_remaining = 0
+        days_completed = total_days
+    else:
+        days_remaining = total_days
+        days_completed = 0
+
+    progress_percent = int(days_completed / total_days * 100)
+
+    return PlanningCycleProgressResponse(
+        currentDay=min(days_completed + 1, total_days),
+        daysCompleted=days_completed,
+        daysRemaining=days_remaining,
+        progressPercent=progress_percent,
+        startLabel=cycle_start.strftime("%d %b %Y"),
+        status=derive_cycle_status(cycle_start, cycle_end, today),
+        totalDays=total_days
+    )
+
+
+def build_completion(totals, activities):
+    income_percent = int((totals["income_received"] / totals["income_planned"] * 100) if totals["income_planned"] else 0)
+    commitment_percent = int((totals["commitments_completed"] / totals["commitments_planned"] * 100) if totals["commitments_planned"] else 0)
+    attention_count = len([activity for activity in activities if activity.status.status in {"PENDING", "CARRIED_FORWARD"} and activity.timeline_label in {"Overdue", "Today", "Tomorrow"}])
+    status = "on_track" if attention_count == 0 else "warning"
+
+    return PlanningCompletionResponse(
+        attentionCount=attention_count,
+        commitmentCompletionPercent=min(commitment_percent, 100),
+        incomeCompletionPercent=min(income_percent, 100),
+        status=status,
+        statusLabel="On Track" if status == "on_track" else "Needs Attention",
+        subtitle=f"Income received {min(income_percent, 100)}% - Commitments completed {min(commitment_percent, 100)}%"
+    )
+
+
+def build_close_readiness(cycle, activities):
+    pending = [activity for activity in activities if activity.status.status in {"PENDING", "CARRIED_FORWARD"}]
+    total = len(activities)
+
+    return PlanningCloseReadinessResponse(
+        canClose=cycle.status == "Current",
+        completedCount=max(total - len(pending), 0),
+        pendingCount=len(pending),
+        reviewRequired=len(pending) > 0,
+        totalCount=total
+    )
 def build_planning(vault_id):
     cycle = get_current_cycle(vault_id)
     month = cycle.start_month
@@ -120,6 +272,22 @@ def build_planning(vault_id):
         cycle.start_iso,
         cycle.end_iso
     )
+    commitment_rows = get_commitments(vault_id)
+    income_rows = get_income_templates(vault_id)
+    activities = [
+        build_activity("income", row, statuses.get(("income", row[0])), month, year)
+        for row in income_rows
+    ] + [
+        build_activity("commitment", row, statuses.get(("commitment", row[0])), month, year)
+        for row in commitment_rows
+    ]
+    activities.sort(key=lambda activity: (activity.due_day, activity.kind, activity.id))
+    timeline = [
+        activity
+        for activity in activities
+        if activity.status.status in {"PENDING", "CARRIED_FORWARD"}
+    ]
+    timeline.sort(key=lambda activity: (activity.due_date, activity.due_day, activity.id))
 
     return PlanningResponse(
         cycle=adapt_cycle(cycle),
@@ -140,15 +308,20 @@ def build_planning(vault_id):
                 row,
                 statuses.get(("commitment", row[0]))
             )
-            for row in get_commitments(vault_id)
+            for row in commitment_rows
         ],
         incomeTemplates=[
             adapt_income_template(
                 row,
                 statuses.get(("income", row[0]))
             )
-            for row in get_income_templates(vault_id)
-        ]
+            for row in income_rows
+        ],
+        activities=activities,
+        timeline=timeline[:5],
+        cycleProgress=build_cycle_progress(cycle),
+        completion=build_completion(cycle_summary, activities),
+        closeReadiness=build_close_readiness(cycle, activities)
     )
 
 
@@ -320,5 +493,19 @@ def set_income_status(
 
 
 @router.post("/cycles/close-active", response_model=PlanningCycleResponse, response_model_by_alias=True)
-def close_cycle(vault: VaultContext = Depends(get_authenticated_vault)):
-    return adapt_cycle(close_active_cycle(int_vault_id(vault)))
+def close_cycle(
+    request: PlanningCloseRequest | None = Body(default=None),
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    vault_id = int_vault_id(vault)
+    cycle = get_current_cycle(vault_id)
+
+    if request and request.items:
+        finalize_month(
+            vault_id,
+            cycle.start_month,
+            cycle.start_year,
+            [item.dict() for item in request.items]
+        )
+
+    return adapt_cycle(close_active_cycle(vault_id))

@@ -98,9 +98,22 @@ class SetupStatusResponse(BaseModel):
     is_complete: bool = Field(alias="isComplete")
 
 
+class SafeToSpendBreakdownItem(BaseModel):
+    key: str
+    label: str
+    amount: float
+    operation: Literal["add", "subtract"]
+
+
+class SafeToSpendBreakdownResponse(BaseModel):
+    items: List[SafeToSpendBreakdownItem]
+    total: float
+
+
 class DashboardDataResponse(BaseModel):
     cycle: FinancialCycleResponse
     safe_to_spend: float = Field(alias="safeToSpend")
+    safe_to_spend_breakdown: SafeToSpendBreakdownResponse = Field(alias="safeToSpendBreakdown")
     primary_account: PrimaryAccountResponse = Field(alias="primaryAccount")
     expenses_this_cycle: float = Field(alias="expensesThisCycle")
     remaining_commitments: float = Field(alias="remainingCommitments")
@@ -347,11 +360,73 @@ class IncomeTemplateResponse(BaseModel):
     status: PlanningStatusResponse
 
 
+
+class PlanningCycleProgressResponse(BaseModel):
+    current_day: int = Field(alias="currentDay")
+    days_completed: int = Field(alias="daysCompleted")
+    days_remaining: int = Field(alias="daysRemaining")
+    progress_percent: int = Field(alias="progressPercent")
+    start_label: str = Field(alias="startLabel")
+    status: str
+    total_days: int = Field(alias="totalDays")
+
+
+class PlanningCompletionResponse(BaseModel):
+    attention_count: int = Field(alias="attentionCount")
+    commitment_completion_percent: int = Field(alias="commitmentCompletionPercent")
+    income_completion_percent: int = Field(alias="incomeCompletionPercent")
+    status: str
+    status_label: str = Field(alias="statusLabel")
+    subtitle: str
+
+
+class PlanningActivityResponse(BaseModel):
+    account_id: Optional[int] = Field(default=None, alias="accountId")
+    account_name: Optional[str] = Field(default=None, alias="accountName")
+    actual_amount: float = Field(alias="actualAmount")
+    amount: float
+    complete_label: str = Field(alias="completeLabel")
+    complete_status: str = Field(alias="completeStatus")
+    due_date: str = Field(alias="dueDate")
+    due_day: int = Field(alias="dueDay")
+    effective_expected_amount: float = Field(alias="effectiveExpectedAmount")
+    icon: str
+    id: int
+    kind: str
+    name: str
+    status: PlanningStatusResponse
+    status_label: str = Field(alias="statusLabel")
+    timeline_label: str = Field(alias="timelineLabel")
+
+
+class PlanningCloseReadinessResponse(BaseModel):
+    can_close: bool = Field(alias="canClose")
+    completed_count: int = Field(alias="completedCount")
+    pending_count: int = Field(alias="pendingCount")
+    review_required: bool = Field(alias="reviewRequired")
+    total_count: int = Field(alias="totalCount")
+
+
+class PlanningCloseItemRequest(BaseModel):
+    id: int
+    type: str
+    action: str
+    amount: float
+
+
+class PlanningCloseRequest(BaseModel):
+    items: List[PlanningCloseItemRequest] = []
+
 class PlanningResponse(BaseModel):
     cycle: PlanningCycleResponse
     totals: PlanningTotalsResponse
     commitments: List[CommitmentResponse]
     income_templates: List[IncomeTemplateResponse] = Field(alias="incomeTemplates")
+    activities: List[PlanningActivityResponse] = []
+    timeline: List[PlanningActivityResponse] = []
+    cycle_progress: Optional[PlanningCycleProgressResponse] = Field(default=None, alias="cycleProgress")
+    completion: Optional[PlanningCompletionResponse] = None
+    close_readiness: Optional[PlanningCloseReadinessResponse] = Field(default=None, alias="closeReadiness")
 
 
 class PlanningItemRequest(BaseModel):

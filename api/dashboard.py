@@ -12,6 +12,8 @@ from api.schemas import (
     FinancialCycleResponse,
     PrimaryAccountResponse,
     RecentActivityItem,
+    SafeToSpendBreakdownItem,
+    SafeToSpendBreakdownResponse,
     SetupStatusResponse,
     SettlementResponse,
     VaultContext,
@@ -94,6 +96,64 @@ def adapt_recent_activity(rows):
     return items
 
 
+def build_safe_to_spend_breakdown(summary):
+    settlement = summary["settlement_summary"]
+    items = [
+        SafeToSpendBreakdownItem(
+            key="available_cash",
+            label="Available Cash",
+            amount=number(summary["available_cash"]),
+            operation="add"
+        ),
+        SafeToSpendBreakdownItem(
+            key="you_owe",
+            label="You Owe",
+            amount=number(settlement["payable"]),
+            operation="subtract"
+        ),
+        SafeToSpendBreakdownItem(
+            key="remaining_commitments",
+            label="Remaining Commitments",
+            amount=number(summary["remaining_commitments"]),
+            operation="subtract"
+        ),
+        SafeToSpendBreakdownItem(
+            key="credit_card_due",
+            label="Credit Card Due",
+            amount=number(summary["credit_card_due"]),
+            operation="subtract"
+        ),
+        SafeToSpendBreakdownItem(
+            key="savings_goal",
+            label="Savings Goal",
+            amount=number(summary["monthly_savings_goal"]),
+            operation="subtract"
+        )
+    ]
+    raw_total = (
+        items[0].amount
+        - items[1].amount
+        - items[2].amount
+        - items[3].amount
+        - items[4].amount
+    )
+    total = number(summary["safe_to_spend"])
+
+    if raw_total < 0 and total == 0:
+        items.append(
+            SafeToSpendBreakdownItem(
+                key="minimum_safe_to_spend_floor",
+                label="Minimum Safe to Spend",
+                amount=abs(raw_total),
+                operation="add"
+            )
+        )
+
+    return SafeToSpendBreakdownResponse(
+        items=items,
+        total=total
+    )
+
 def adapt_dashboard_response(vault: VaultContext, payload, cycle):
     safe_payload = to_json_safe(payload)
     summary = safe_payload["summary"]
@@ -122,6 +182,7 @@ def adapt_dashboard_response(vault: VaultContext, payload, cycle):
                 progressPercent=cycle.progress_percent
             ),
             safeToSpend=number(summary["safe_to_spend"]),
+            safeToSpendBreakdown=build_safe_to_spend_breakdown(summary),
             primaryAccount=PrimaryAccountResponse(
                 name=str(summary["primary_account_name"]),
                 balance=number(summary["primary_account_balance"])

@@ -56,6 +56,7 @@ def dashboard_payload():
             "total_liabilities": Decimal("1200.00"),
             "actual_savings": Decimal("16600.00"),
             "remaining_commitments": Decimal("17800.00"),
+            "monthly_savings_goal": Decimal("12610.50"),
             "expenses": Decimal("28400.00"),
             "personal_expenses": Decimal("20000.00"),
             "shared_paid": Decimal("8400.00"),
@@ -181,6 +182,15 @@ def test_dashboard_adapter_serializes_decimal_and_dates(monkeypatch):
     body = response.model_dump(by_alias=True)
 
     assert body["data"]["safeToSpend"] == 38240.0
+    breakdown = body["data"]["safeToSpendBreakdown"]
+    assert breakdown["total"] == body["data"]["safeToSpend"]
+    assert breakdown["items"] == [
+        {"key": "available_cash", "label": "Available Cash", "amount": 82300.5, "operation": "add"},
+        {"key": "you_owe", "label": "You Owe", "amount": 1250.0, "operation": "subtract"},
+        {"key": "remaining_commitments", "label": "Remaining Commitments", "amount": 17800.0, "operation": "subtract"},
+        {"key": "credit_card_due", "label": "Credit Card Due", "amount": 12400.0, "operation": "subtract"},
+        {"key": "savings_goal", "label": "Savings Goal", "amount": 12610.5, "operation": "subtract"}
+    ]
     assert body["data"]["recentActivity"][0]["date"] == "2026-07-12"
     assert body["data"]["recentActivity"][0]["direction"] == "debit"
     assert body["data"]["recentActivity"][0]["signedAmount"] == -220.0
@@ -188,6 +198,44 @@ def test_dashboard_adapter_serializes_decimal_and_dates(monkeypatch):
     assert body["data"]["spendingByCategory"][0]["key"] == "category:11"
     assert body["data"]["settlement"]["items"][0]["created_at"] == "2026-07-12T08:30:00"
 
+
+def test_dashboard_safe_to_spend_breakdown_clamps_negative_total(monkeypatch):
+    from api.dashboard import adapt_dashboard_response
+    from api.schemas import VaultContext
+
+    payload = dashboard_payload()
+    payload["summary"] = {
+        **payload["summary"],
+        "available_cash": Decimal("100.00"),
+        "remaining_commitments": Decimal("300.00"),
+        "credit_card_due": Decimal("200.00"),
+        "monthly_savings_goal": Decimal("50.00"),
+        "safe_to_spend": Decimal("0.00"),
+        "settlement_summary": {
+            **payload["summary"]["settlement_summary"],
+            "payable": Decimal("25.00")
+        }
+    }
+
+    response = adapt_dashboard_response(
+        VaultContext(id="7", name="Karuna", isAdmin=True, vaultType="Individual"),
+        payload,
+        cycle()
+    )
+    breakdown = response.model_dump(by_alias=True)["data"]["safeToSpendBreakdown"]
+    signed_total = sum(
+        item["amount"] if item["operation"] == "add" else -item["amount"]
+        for item in breakdown["items"]
+    )
+
+    assert breakdown["total"] == 0.0
+    assert signed_total == 0.0
+    assert breakdown["items"][-1] == {
+        "key": "minimum_safe_to_spend_floor",
+        "label": "Minimum Safe to Spend",
+        "amount": 475.0,
+        "operation": "add"
+    }
 
 def test_recent_activity_contains_at_most_five_records(monkeypatch):
     client = build_client(monkeypatch)
