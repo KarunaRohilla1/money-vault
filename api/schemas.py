@@ -319,6 +319,19 @@ class PlanningCycleResponse(BaseModel):
     start_month: int = Field(alias="startMonth")
     start_year: int = Field(alias="startYear")
     status: str
+    display_label: str = Field(alias="displayLabel")
+    total_days: int = Field(alias="totalDays")
+    days_completed: int = Field(alias="daysCompleted")
+    days_remaining: int = Field(alias="daysRemaining")
+    current_day: int = Field(alias="currentDay")
+    progress_percent: int = Field(alias="progressPercent")
+    is_current: bool = Field(alias="isCurrent")
+    is_completed: bool = Field(alias="isCompleted")
+    is_upcoming: bool = Field(alias="isUpcoming")
+    closed_at: Optional[str] = Field(default=None, alias="closedAt")
+    display_month: str = Field(alias="displayMonth")
+    previous_cycle_start: str = Field(alias="previousCycleStart")
+    next_cycle_start: str = Field(alias="nextCycleStart")
 
 
 class PlanningTotalsResponse(BaseModel):
@@ -360,6 +373,24 @@ class IncomeTemplateResponse(BaseModel):
     status: PlanningStatusResponse
 
 
+
+
+class PlanningCycleOptionResponse(BaseModel):
+    key: str
+    label: str
+    start_date: str = Field(alias="startDate")
+    end_date: str = Field(alias="endDate")
+    status: str
+    year: int
+
+
+class PlanningCycleNavigationResponse(BaseModel):
+    current_cycle_start: str = Field(alias="currentCycleStart")
+    cycles: List[PlanningCycleOptionResponse]
+    year: Optional[int] = None
+    status: str = "all"
+    has_previous_year: bool = Field(default=True, alias="hasPreviousYear")
+    has_next_year: bool = Field(default=True, alias="hasNextYear")
 
 class PlanningCycleProgressResponse(BaseModel):
     current_day: int = Field(alias="currentDay")
@@ -427,6 +458,7 @@ class PlanningResponse(BaseModel):
     cycle_progress: Optional[PlanningCycleProgressResponse] = Field(default=None, alias="cycleProgress")
     completion: Optional[PlanningCompletionResponse] = None
     close_readiness: Optional[PlanningCloseReadinessResponse] = Field(default=None, alias="closeReadiness")
+    cycle_navigation: Optional[PlanningCycleNavigationResponse] = Field(default=None, alias="cycleNavigation")
 
 
 class PlanningItemRequest(BaseModel):
@@ -448,32 +480,53 @@ class WishlistCategoryResponse(BaseModel):
     id: int
     vault_id: int = Field(alias="vaultId")
     name: str
+    icon: str = "tag-outline"
+    color: str = "purple"
+    sort_order: int = Field(default=0, alias="sortOrder")
+    item_count: int = Field(default=0, alias="itemCount")
 
 
 class WishlistCategoryRequest(BaseModel):
+    color: str = "purple"
     fallback: str = "General"
+    icon: str = "tag-outline"
     name: str = Field(min_length=1)
+    sort_order: int = Field(default=0, alias="sortOrder")
+
+
+class WishlistCategoryReorderItem(BaseModel):
+    id: int
+    sort_order: int = Field(alias="sortOrder")
+
+
+class WishlistCategoryReorderRequest(BaseModel):
+    categories: List[WishlistCategoryReorderItem]
 
 
 class WishlistItemResponse(BaseModel):
     account_id: Optional[int] = Field(default=None, alias="accountId")
     account_name: Optional[str] = Field(default=None, alias="accountName")
     category: str
+    category_id: Optional[int] = Field(default=None, alias="categoryId")
+    created_at: Optional[str] = Field(default=None, alias="createdAt")
     estimated_cost: float = Field(alias="estimatedCost")
     id: int
+    image_source: Optional[str] = Field(default=None, alias="imageSource")
     image_url: str = Field(alias="imageUrl")
     name: str
     notes: str
-    progress_percent: int = Field(alias="progressPercent")
-    saved_amount: float = Field(alias="savedAmount")
+    priority: str = "MEDIUM"
+    progress_percent: int = Field(default=0, alias="progressPercent")
+    purchase_link: str = Field(default="", alias="purchaseLink")
+    saved_amount: float = Field(default=0, alias="savedAmount")
     target_date: Optional[str] = Field(default=None, alias="targetDate")
 
 
 class WishlistSummaryResponse(BaseModel):
     total_items: int = Field(alias="totalItems")
     total_cost: float = Field(alias="totalCost")
-    total_saved: float = Field(alias="totalSaved")
-    progress: int
+    total_saved: float = Field(default=0, alias="totalSaved")
+    progress: int = 0
 
 
 class WishlistResponse(BaseModel):
@@ -485,10 +538,14 @@ class WishlistResponse(BaseModel):
 class WishlistItemRequest(BaseModel):
     account_id: Optional[int] = Field(default=None, alias="accountId")
     category: str = Field(min_length=1)
+    category_id: Optional[int] = Field(default=None, alias="categoryId")
     estimated_cost: float = Field(alias="estimatedCost", gt=0)
+    image_source: Optional[str] = Field(default=None, alias="imageSource")
     image_url: str = Field(default="", alias="imageUrl")
     name: str = Field(min_length=1)
-    notes: str = ""
+    notes: str = Field(default="", max_length=300)
+    priority: str = "MEDIUM"
+    purchase_link: str = Field(default="", alias="purchaseLink")
     saved_amount: float = Field(default=0, alias="savedAmount", ge=0)
     target_date: Optional[str] = Field(default=None, alias="targetDate")
 
@@ -524,6 +581,29 @@ class ReportReviewItem(BaseModel):
     format: Literal["money", "text", "count"] = "text"
 
 
+class ReportBiggestPurchase(BaseModel):
+    title: str
+    amount: float
+    date: Optional[str] = None
+
+
+class ReportCycleProgress(BaseModel):
+    completed_transactions: int = Field(alias="completedTransactions")
+    total_transactions: int = Field(alias="totalTransactions")
+    percent: int
+
+
+class ReportFinancialReview(BaseModel):
+    period: str
+    total_transactions: int = Field(alias="totalTransactions")
+    transfers: int
+    largest_expense: ReportReviewItem = Field(alias="largestExpense")
+    most_used_category: ReportReviewItem = Field(alias="mostUsedCategory")
+    most_used_account: ReportReviewItem = Field(alias="mostUsedAccount")
+    biggest_purchase: ReportBiggestPurchase = Field(alias="biggestPurchase")
+    cycle_progress: ReportCycleProgress = Field(alias="cycleProgress")
+
+
 class ReportCategoryItem(BaseModel):
     key: str
     icon: str
@@ -544,6 +624,7 @@ class ReportTrendItem(BaseModel):
 class ReportsData(BaseModel):
     summary: Dict[str, Any]
     overview: List[ReportMoneyCard]
+    financial_review: ReportFinancialReview = Field(alias="financialReview")
     monthly_review: List[ReportReviewItem] = Field(alias="monthlyReview")
     monthly_summary: List[ReportReviewItem] = Field(alias="monthlySummary")
     shared_insights: List[ReportReviewItem] = Field(alias="sharedInsights")
@@ -560,6 +641,98 @@ class ReportsResponse(BaseModel):
     cycle_options: List[ReportCycleOption] = Field(alias="cycleOptions")
     data: ReportsData
 
+
+
+
+class ReportSpendingComparison(BaseModel):
+    label: str
+    direction: Literal["up", "down", "flat"] = "flat"
+    percent: int = 0
+
+
+class ReportSpendingSummaryMetric(BaseModel):
+    key: str
+    title: str
+    value: float | int | str | None
+    format: Literal["money", "text", "count"] = "money"
+    caption: str = ""
+    tone: str = "purple"
+    comparison: Optional[ReportSpendingComparison] = None
+
+
+class ReportSpendingVisualizationItem(BaseModel):
+    id: str
+    key: str
+    label: str
+    icon: str = "label"
+    color: str
+    amount: float
+    percent: int
+    transaction_count: int = Field(alias="transactionCount")
+
+
+class ReportSpendingVisualization(BaseModel):
+    type: Literal["donut", "horizontalBar", "verticalBar", "percentageBar"]
+    title: str
+    total: float
+    items: List[ReportSpendingVisualizationItem]
+
+
+class ReportSpendingTrendPoint(BaseModel):
+    date: str
+    label: str
+    amount: float
+
+
+class ReportSpendingTrend(BaseModel):
+    title: str
+    points: List[ReportSpendingTrendPoint]
+
+
+class ReportSpendingBreakdownRow(BaseModel):
+    id: str
+    key: str
+    label: str
+    sub_label: str = Field(default="", alias="subLabel")
+    icon: str = "label"
+    amount: float
+    percent: int
+    transaction_count: int = Field(default=0, alias="transactionCount")
+
+
+class ReportSpendingBreakdown(BaseModel):
+    title: str
+    rows: List[ReportSpendingBreakdownRow]
+
+
+class ReportSpendingFilterOptions(BaseModel):
+    accounts: List[str]
+    categories: List[str]
+    merchants: List[str]
+    payment_modes: List[str] = Field(alias="paymentModes")
+
+
+class ReportSpendingMetadata(BaseModel):
+    dimension: Literal["categories", "merchants", "accounts", "paymentModes"]
+    question: str
+    empty_title: str = Field(alias="emptyTitle")
+    empty_message: str = Field(alias="emptyMessage")
+    filter_options: ReportSpendingFilterOptions = Field(alias="filterOptions")
+
+
+class ReportSpendingData(BaseModel):
+    summary: List[ReportSpendingSummaryMetric]
+    visualization: ReportSpendingVisualization
+    trend: ReportSpendingTrend
+    breakdown: ReportSpendingBreakdown
+    metadata: ReportSpendingMetadata
+
+
+class ReportSpendingResponse(BaseModel):
+    generated_at: datetime = Field(alias="generatedAt")
+    vault: VaultContext
+    filters: ReportFilters
+    data: ReportSpendingData
 
 class VaultSummaryResponse(BaseModel):
     id: int
@@ -622,3 +795,4 @@ class SharedSettlementRequest(BaseModel):
 
 class SharedPageResponse(BaseModel):
     data: Dict[str, Any]
+

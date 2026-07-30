@@ -14,6 +14,7 @@ from api.schemas import (
     SuccessResponse,
     VaultContext,
     WishlistCategoryRequest,
+    WishlistCategoryReorderRequest,
     WishlistCategoryResponse,
     WishlistItemRequest,
     WishlistItemResponse,
@@ -29,6 +30,7 @@ from db.wishlist import (
     get_wishlist_category,
     get_wishlist_items,
     get_wishlist_summary,
+    reorder_wishlist_categories,
     update_wishlist_category,
     update_wishlist_item
 )
@@ -45,7 +47,11 @@ def adapt_category(row):
     return WishlistCategoryResponse(
         id=int(row[0]),
         vaultId=int(row[1]),
-        name=row[2]
+        name=row[2],
+        icon=row[3] or "tag-outline",
+        color=row[4] or "purple",
+        sortOrder=int(row[5] or 0),
+        itemCount=int(row[6] or 0) if len(row) > 6 else 0
     )
 
 
@@ -64,6 +70,11 @@ def adapt_item(row):
         accountName=row[7],
         imageUrl=row[8] or "",
         notes=row[9] or "",
+        priority=(row[10] or "MEDIUM"),
+        purchaseLink=row[11] or "",
+        imageSource=row[12],
+        createdAt=str(row[13]) if row[13] else None,
+        categoryId=int(row[14]) if row[14] is not None else None,
         progressPercent=progress
     )
 
@@ -106,7 +117,10 @@ def wishlist(
 def create_category(request: WishlistCategoryRequest, vault: VaultContext = Depends(get_authenticated_vault)):
     add_wishlist_category(
         int_vault_id(vault),
-        request.name
+        request.name,
+        icon=request.icon,
+        color=request.color,
+        sort_order=request.sort_order
     )
     return SuccessResponse()
 
@@ -128,10 +142,28 @@ def update_category(
             category_id,
             vault_id,
             category[2],
-            request.name
+            request.name,
+            icon=request.icon,
+            color=request.color,
+            sort_order=request.sort_order
         )
     except ValueError as error:
         raise bad_request(str(error)) from error
+    return SuccessResponse()
+
+
+
+
+@router.put("/categories/reorder", response_model=SuccessResponse, response_model_by_alias=True)
+def reorder_categories(request: WishlistCategoryReorderRequest, vault: VaultContext = Depends(get_authenticated_vault)):
+    vault_id = int_vault_id(vault)
+    reorder_wishlist_categories(
+        vault_id,
+        [
+            {"id": item.id, "sort_order": item.sort_order}
+            for item in request.categories
+        ]
+    )
     return SuccessResponse()
 
 
@@ -173,7 +205,11 @@ def create_item(request: WishlistItemRequest, vault: VaultContext = Depends(get_
         target_date=request.target_date,
         account_id=request.account_id,
         image_url=request.image_url,
-        notes=request.notes
+        notes=request.notes,
+        category_id=request.category_id,
+        priority=request.priority,
+        purchase_link=request.purchase_link,
+        image_source=request.image_source
     )
     return SuccessResponse()
 
@@ -203,7 +239,11 @@ def update_item(
         target_date=request.target_date,
         account_id=request.account_id,
         image_url=request.image_url,
-        notes=request.notes
+        notes=request.notes,
+        category_id=request.category_id,
+        priority=request.priority,
+        purchase_link=request.purchase_link,
+        image_source=request.image_source
     )
     return SuccessResponse()
 

@@ -78,6 +78,10 @@ def migrate_database():
         WHERE beneficiary_vault_id IS NULL
         """)
 
+        from db.wishlist import ensure_wishlist_schema_with_cursor
+
+        ensure_wishlist_schema_with_cursor(cursor)
+
         cursor.execute("""
         INSERT INTO wishlist_categories (vault_id, name)
         SELECT DISTINCT vault_id, TRIM(category)

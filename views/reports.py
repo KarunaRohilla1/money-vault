@@ -341,6 +341,7 @@ def get_report_summary(vault_id, start_date, end_date, cycle_windows):
                     SELECT
                         t.id,
                         t.amount,
+                        t.date::date AS date,
                         COALESCE(NULLIF(t.notes, ''), c.name, 'Expense') AS name,
                         COALESCE(c.emoji || ' ' || c.name, 'Uncategorized') AS category_name,
                         c.id AS category_id,
@@ -354,7 +355,7 @@ def get_report_summary(vault_id, start_date, end_date, cycle_windows):
                     AND t.date::date BETWEEN ?::date AND ?::date
                 ),
                 largest_expense AS (
-                    SELECT name, amount
+                    SELECT name, amount, date
                     FROM shared_expenses
                     ORDER BY amount DESC
                     LIMIT 1
@@ -379,6 +380,7 @@ def get_report_summary(vault_id, start_date, end_date, cycle_windows):
                     (SELECT COUNT(*) FROM shared_expenses),
                     largest_expense.name,
                     largest_expense.amount,
+                    largest_expense.date,
                     most_used_category.category_name,
                     most_used_category.count,
                     most_used_account.name,
@@ -420,18 +422,18 @@ def get_report_summary(vault_id, start_date, end_date, cycle_windows):
             "transactions": summary_row[0] if summary_row else 0,
             "transfers": 0,
             "largest_expense": (
-                (summary_row[1], summary_row[2])
+                (summary_row[1], summary_row[2], summary_row[3])
                 if summary_row and summary_row[1] is not None
                 else None
             ),
             "most_used_category": (
-                (summary_row[3], summary_row[4])
-                if summary_row and summary_row[3] is not None
+                (summary_row[4], summary_row[5])
+                if summary_row and summary_row[4] is not None
                 else None
             ),
             "most_used_account": (
-                (summary_row[5], summary_row[6])
-                if summary_row and summary_row[5] is not None
+                (summary_row[6], summary_row[7])
+                if summary_row and summary_row[6] is not None
                 else None
             )
         }
@@ -459,7 +461,8 @@ def get_report_summary(vault_id, start_date, end_date, cycle_windows):
             largest_expense AS (
                 SELECT
                     COALESCE(NULLIF(t.notes, ''), c.name, 'Expense') AS name,
-                    t.amount
+                    t.amount,
+                    t.date::date AS date
                 FROM transactions t
                 LEFT JOIN categories c
                     ON t.category_id = c.id
@@ -505,6 +508,7 @@ def get_report_summary(vault_id, start_date, end_date, cycle_windows):
                 transfers.count,
                 largest_expense.name,
                 largest_expense.amount,
+                largest_expense.date,
                 most_used_category.name,
                 most_used_category.count,
                 most_used_account.name,
@@ -556,18 +560,18 @@ def get_report_summary(vault_id, start_date, end_date, cycle_windows):
         "transactions": summary_row[0] if summary_row else 0,
         "transfers": summary_row[1] if summary_row else 0,
         "largest_expense": (
-            (summary_row[2], summary_row[3])
+            (summary_row[2], summary_row[3], summary_row[4])
             if summary_row and summary_row[2] is not None
             else None
         ),
         "most_used_category": (
-            (summary_row[4], summary_row[5])
-            if summary_row and summary_row[4] is not None
+            (summary_row[5], summary_row[6])
+            if summary_row and summary_row[5] is not None
             else None
         ),
         "most_used_account": (
-            (summary_row[6], summary_row[7])
-            if summary_row and summary_row[6] is not None
+            (summary_row[7], summary_row[8])
+            if summary_row and summary_row[7] is not None
             else None
         )
     }

@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, Query
 
 from api.dependencies import get_authenticated_vault
 from api.resources import (
@@ -14,6 +14,8 @@ from api.schemas import (
     CommitmentResponse,
     IncomeTemplateResponse,
     PlanningCycleResponse,
+    PlanningCycleNavigationResponse,
+    PlanningCycleOptionResponse,
     PlanningActivityResponse,
     PlanningCloseReadinessResponse,
     PlanningCloseRequest,
@@ -27,7 +29,7 @@ from api.schemas import (
     SuccessResponse,
     VaultContext
 )
-from db.financial_cycles import close_active_cycle, derive_cycle_status, get_current_cycle
+from db.financial_cycles import CURRENT, close_active_cycle, derive_cycle_status, get_current_cycle, get_cycle_for_date
 from db.core import get_planning_transaction_date
 from db.planning import (
     add_commitment,
@@ -57,7 +59,24 @@ def number(value):
     return float(value or 0)
 
 
+def adjacent_cycle(vault_id, cycle, direction):
+    if direction == "previous":
+        target = cycle.start_date.toordinal() - 1
+    elif direction == "next":
+        target = cycle.end_date.toordinal() + 1
+    else:
+        raise bad_request("Choose previous or next cycle.")
+
+    return get_cycle_for_date(
+        vault_id,
+        date.fromordinal(target).isoformat()
+    )
+
+
 def adapt_cycle(cycle):
+    previous_cycle = adjacent_cycle(cycle.vault_id, cycle, "previous")
+    next_cycle = adjacent_cycle(cycle.vault_id, cycle, "next")
+
     return PlanningCycleResponse(
         id=int(cycle.id),
         vaultId=int(cycle.vault_id),
@@ -65,8 +84,90 @@ def adapt_cycle(cycle):
         endDate=cycle.end_iso,
         startMonth=int(cycle.start_month),
         startYear=int(cycle.start_year),
-        status=cycle.status
+        status=cycle.status,
+        displayLabel=cycle.display_name,
+        totalDays=int(cycle.total_days),
+        daysCompleted=int(cycle.days_completed),
+        daysRemaining=int(cycle.days_remaining),
+        currentDay=min(int(cycle.days_completed) + 1, int(cycle.total_days)),
+        progressPercent=int(cycle.progress_percent),
+        isCurrent=cycle.status == "Current",
+        isCompleted=cycle.status == "Completed",
+        isUpcoming=cycle.status == "Upcoming",
+        closedAt=str(cycle.closed_at) if cycle.closed_at else None,
+        displayMonth=cycle.start_date.strftime("%B %Y"),
+        previousCycleStart=previous_cycle.start_iso,
+        nextCycleStart=next_cycle.start_iso
     )
+
+
+def adapt_cycle_option(cycle):
+    return PlanningCycleOptionResponse(
+        key=cycle.start_iso,
+        label=f"{cycle.start_date.strftime('%b %Y')} - {cycle.status}",
+        startDate=cycle.start_iso,
+        endDate=cycle.end_iso,
+        status=cycle.status,
+        year=int(cycle.start_date.year)
+    )
+
+
+def cycles_for_year(vault_id, year, status_filter="all"):
+    starts = {}
+    for month in range(1, 13):
+        for day in (1, 15, 28):
+            cycle = get_cycle_for_date(vault_id, date(year, month, day).isoformat())
+            if cycle.start_date.year == year:
+                starts[cycle.start_iso] = cycle
+
+    current = get_current_cycle(vault_id)
+    if current.start_date.year == year:
+        starts[current.start_iso] = current
+
+    cycles = sorted(starts.values(), key=lambda cycle: cycle.start_date)
+    if status_filter != "all":
+        wanted = status_filter.lower()
+        cycles = [cycle for cycle in cycles if cycle.status.lower() == wanted]
+
+    return cycles
+
+
+def build_cycle_navigation(vault_id, year=None, status_filter="all"):
+    selected_year = int(year or date.today().year)
+    status_value = (status_filter or "all").lower()
+    if status_value not in {"all", "current", "completed", "upcoming"}:
+        raise bad_request("Choose a valid cycle status filter.")
+
+    return PlanningCycleNavigationResponse(
+        currentCycleStart=get_current_cycle(vault_id).start_iso,
+        cycles=[adapt_cycle_option(cycle) for cycle in cycles_for_year(vault_id, selected_year, status_value)],
+        year=selected_year,
+        status=status_value,
+        hasPreviousYear=True,
+        hasNextYear=True
+    )
+
+
+def build_cycle_navigation_summary(vault_id, cycle):
+    return PlanningCycleNavigationResponse(
+        currentCycleStart=get_current_cycle(vault_id).start_iso,
+        cycles=[],
+        year=cycle.start_date.year,
+        status="all",
+        hasPreviousYear=True,
+        hasNextYear=True
+    )
+
+
+def select_cycle(vault_id, cycle_start=None):
+    if not cycle_start:
+        return get_current_cycle(vault_id)
+
+    cycle = get_cycle_for_date(vault_id, cycle_start)
+    if cycle.start_iso != cycle_start:
+        raise bad_request("Choose a valid financial cycle start date.")
+
+    return cycle
 
 
 def adapt_status(status):
@@ -251,8 +352,8 @@ def build_close_readiness(cycle, activities):
         reviewRequired=len(pending) > 0,
         totalCount=total
     )
-def build_planning(vault_id):
-    cycle = get_current_cycle(vault_id)
+def build_planning(vault_id, cycle_start=None):
+    cycle = select_cycle(vault_id, cycle_start)
     month = cycle.start_month
     year = cycle.start_year
     statuses = get_planning_activity_statuses(
@@ -294,7 +395,7 @@ def build_planning(vault_id):
         totals=PlanningTotalsResponse(
             income=number(monthly_totals["income"]),
             plannedCommitments=number(monthly_totals["planned_commitments"]),
-            remainingCommitments=number(monthly_totals["remaining_commitments"]),
+            remainingCommitments=number(cycle_summary["remaining_commitments"]),
             incomePlanned=number(cycle_summary["income_planned"]),
             incomeReceived=number(cycle_summary["income_received"]),
             commitmentsPlanned=number(cycle_summary["commitments_planned"]),
@@ -321,13 +422,37 @@ def build_planning(vault_id):
         timeline=timeline[:5],
         cycleProgress=build_cycle_progress(cycle),
         completion=build_completion(cycle_summary, activities),
-        closeReadiness=build_close_readiness(cycle, activities)
+        closeReadiness=build_close_readiness(cycle, activities),
+        cycleNavigation=build_cycle_navigation_summary(vault_id, cycle)
     )
 
 
 @router.get("", response_model=PlanningResponse, response_model_by_alias=True)
-def planning(vault: VaultContext = Depends(get_authenticated_vault)):
-    return build_planning(int_vault_id(vault))
+def planning(
+    cycle_start: str | None = Query(default=None, alias="cycleStart"),
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    return build_planning(int_vault_id(vault), cycle_start)
+
+
+@router.get("/cycles", response_model=PlanningCycleNavigationResponse, response_model_by_alias=True)
+def planning_cycles(
+    year: int | None = Query(default=None),
+    status: str = Query(default="all"),
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    return build_cycle_navigation(int_vault_id(vault), year, status)
+
+
+@router.get("/cycles/adjacent", response_model=PlanningCycleResponse, response_model_by_alias=True)
+def adjacent_planning_cycle(
+    cycle_start: str = Query(alias="cycleStart"),
+    direction: str = Query(default="next"),
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    vault_id = int_vault_id(vault)
+    cycle = select_cycle(vault_id, cycle_start)
+    return adapt_cycle(adjacent_cycle(vault_id, cycle, direction))
 
 
 @router.post("/commitments", response_model=SuccessResponse, response_model_by_alias=True)
@@ -492,20 +617,60 @@ def set_income_status(
     return SuccessResponse()
 
 
+def validate_close_request(vault_id, request):
+    if not request or not request.items:
+        return []
+
+    items = []
+    for item in request.items:
+        item_type = item.type
+        if item_type == "income":
+            require_income_template(item.id, vault_id)
+        elif item_type == "commitment":
+            require_commitment(item.id, vault_id)
+        else:
+            raise bad_request("Choose a valid planning item type.")
+
+        if item.action not in {"Paid", "Cancelled", "Carry Forward"}:
+            raise bad_request("Choose a valid close action.")
+        if item.action in {"Paid", "Carry Forward"} and item.amount <= 0:
+            raise bad_request("Enter an amount greater than zero for paid or carried forward items.")
+
+        items.append(item.dict())
+
+    return items
+
+
+def close_selected_cycle(vault_id, cycle_start, request):
+    cycle = select_cycle(vault_id, cycle_start)
+    if cycle.status != CURRENT:
+        raise bad_request("Only the current financial cycle can be closed.")
+
+    close_items = validate_close_request(vault_id, request)
+    if close_items:
+        finalize_month(
+            vault_id,
+            cycle.start_month,
+            cycle.start_year,
+            close_items
+        )
+
+    return adapt_cycle(close_active_cycle(vault_id))
+
+
+@router.post("/cycles/{cycle_start}/close", response_model=PlanningCycleResponse, response_model_by_alias=True)
+def close_cycle_by_start(
+    cycle_start: str,
+    request: PlanningCloseRequest | None = Body(default=None),
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    return close_selected_cycle(int_vault_id(vault), cycle_start, request)
+
+
 @router.post("/cycles/close-active", response_model=PlanningCycleResponse, response_model_by_alias=True)
 def close_cycle(
     request: PlanningCloseRequest | None = Body(default=None),
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
     vault_id = int_vault_id(vault)
-    cycle = get_current_cycle(vault_id)
-
-    if request and request.items:
-        finalize_month(
-            vault_id,
-            cycle.start_month,
-            cycle.start_year,
-            [item.dict() for item in request.items]
-        )
-
-    return adapt_cycle(close_active_cycle(vault_id))
+    return close_selected_cycle(vault_id, get_current_cycle(vault_id).start_iso, request)
