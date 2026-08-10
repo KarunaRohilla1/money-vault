@@ -16,6 +16,7 @@ from api.transactions import router as transactions_router
 from api.transfers import router as transfers_router
 from api.wishlist import router as wishlist_router
 from api.schemas import HealthResponse
+from capture.capture_router import router as capture_router
 
 
 def error_response(status_code, code, message):
@@ -39,19 +40,21 @@ def create_app():
     except ApiConfigError:
         config = None
 
+    # Always enable CORS when configured. In local/lowers, config defaults to ["*"].
     if config and config.cors_allowed_origins:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=config.cors_allowed_origins,
             allow_credentials=False,
-            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            allow_headers=["Authorization", "Content-Type"]
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "Accept"],
         )
 
     app.include_router(auth_router)
     app.include_router(dashboard_router)
     app.include_router(accounts_router)
     app.include_router(categories_router)
+    app.include_router(capture_router)
     app.include_router(planning_router)
     app.include_router(reports_router)
     app.include_router(settings_router)

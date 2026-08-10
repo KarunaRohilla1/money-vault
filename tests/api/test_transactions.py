@@ -403,3 +403,44 @@ def test_transaction_history_forwards_advanced_filters(monkeypatch):
         "transaction_type": "All",
         "vault_id": 4
     }
+
+
+def test_delete_shared_transaction_from_shared_vault_session(monkeypatch):
+    client = build_client(monkeypatch)
+    observed = {}
+
+    from api.security import create_access_token
+
+    active_shared = SimpleNamespace(
+        id="40",
+        name="Shared",
+        vault_type="Shared",
+        is_admin=False
+    )
+    authenticated_personal = SimpleNamespace(
+        id="4",
+        name="Karuna",
+        vault_type="Individual",
+        is_admin=False
+    )
+    token, _expires_at = create_access_token(active_shared, authenticated_personal)
+
+    monkeypatch.setattr(
+        "api.transactions.require_transaction",
+        lambda transaction_id, vault_id: observed.update({"vault_id": vault_id})
+    )
+    monkeypatch.setattr(
+        "api.transactions.delete_transaction",
+        lambda transaction_id: observed.update({"deleted": transaction_id})
+    )
+
+    response = client.delete(
+        "/api/transactions/101",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    assert observed == {
+        "deleted": 101,
+        "vault_id": 4
+    }

@@ -14,6 +14,15 @@ from api.schemas import (
     ReportFinancialReview,
     ReportMoneyCard,
     ReportReviewItem,
+    ReportSharedCategoryImpactItem,
+    ReportSharedContribution,
+    ReportSharedContributionItem,
+    ReportSharedData,
+    ReportSharedExpenseItem,
+    ReportSharedHero,
+    ReportSharedResponse,
+    ReportSharedSettlementCard,
+    ReportSharedSettlementPreview,
     ReportSpendingComparison,
     ReportSpendingData,
     ReportSpendingBreakdown,
@@ -32,6 +41,10 @@ from api.schemas import (
     VaultContext,
 )
 from db.core import EXPENSE, get_connection
+from db.shared_expenses import (
+    get_shared_expenses_page_data,
+    get_shared_vaults_for_personal_with_cursor,
+)
 from db.financial_cycles import (
     add_months,
     build_cycle_navigation_options,
@@ -656,6 +669,277 @@ def reports(
         ),
     )
 
+
+
+SHARED_CONTRIBUTION_COLORS = {
+    "you": "#8B5CF6",
+    "partner": "#2563EB",
+}
+
+
+def normalize_category_key(name):
+    return str(name or "Others").strip().lower()
+
+
+def merge_category_impact(cash_rows, net_rows):
+    actual_by_name = {
+        normalize_category_key(row.name): row
+        for row in cash_rows
+    }
+    projected_by_name = {
+        normalize_category_key(row.name): row
+        for row in net_rows
+    }
+    names = sorted(set(actual_by_name) | set(projected_by_name))
+    items = []
+
+    for index, name_key in enumerate(names):
+        actual_row = actual_by_name.get(name_key)
+        projected_row = projected_by_name.get(name_key)
+        actual_amount = number(actual_row.amount if actual_row else 0)
+        projected_amount = number(projected_row.amount if projected_row else 0)
+        display_name = (
+            projected_row.name
+            if projected_row
+            else actual_row.name
+            if actual_row
+            else "Others"
+        )
+        icon = (
+            projected_row.icon
+            if projected_row
+            else actual_row.icon
+            if actual_row
+            else "label"
+        )
+        items.append(
+            ReportSharedCategoryImpactItem(
+                key=category_key(display_name, index),
+                icon=icon,
+                name=display_name,
+                actualAmount=actual_amount,
+                projectedAmount=projected_amount,
+                difference=round(actual_amount - projected_amount, 2),
+            )
+        )
+
+    items.sort(key=lambda item: item.actual_amount, reverse=True)
+    primary = items[:5]
+    remainder = items[5:]
+
+    if remainder:
+        primary.append(
+            ReportSharedCategoryImpactItem(
+                key="category:others",
+                icon="label",
+                name="Others",
+                actualAmount=round(sum(item.actual_amount for item in remainder), 2),
+                projectedAmount=round(sum(item.projected_amount for item in remainder), 2),
+                difference=round(
+                    sum(item.actual_amount for item in remainder)
+                    - sum(item.projected_amount for item in remainder),
+                    2,
+                ),
+            )
+        )
+
+    return primary
+
+
+def aggregate_shared_expense_context(vault_id, start_date, end_date):
+    conn = get_connection()
+    try:
+        shared_vaults = get_shared_vaults_for_personal_with_cursor(conn, vault_id)
+    finally:
+        conn.close()
+
+    you_paid = 0
+    partner_paid = 0
+    expenses = []
+
+    for shared_vault_id, _shared_name in shared_vaults:
+        page = get_shared_expenses_page_data(
+            shared_vault_id,
+            start_date.isoformat(),
+            end_date.isoformat(),
+        )
+        summary = page.get("summary") or {}
+        you_paid += number(summary.get("paid_by_current"))
+        partner_paid += number(summary.get("paid_by_other"))
+
+        for expense in page.get("expenses") or []:
+            expenses.append(
+                {
+                    "id": int(expense["id"]),
+                    "icon": str(expense.get("category_icon") or "label"),
+                    "name": str(expense.get("merchant") or expense.get("category") or "Shared expense"),
+                    "date": str(expense.get("date") or ""),
+                    "amount": number(expense.get("amount")),
+                }
+            )
+
+    expenses.sort(key=lambda item: item["amount"], reverse=True)
+    return you_paid, partner_paid, expenses[:5]
+
+
+def shared_report_payload(vault_id, selected_cycle, context):
+    if is_shared_vault(vault_id):
+        raise bad_request("Shared reports are available for personal vaults only.")
+
+    start_date = context["start_date"]
+    end_date = context["end_date"]
+    cycle_windows = context["cycle_windows"]
+    summary = to_json_safe(
+        get_report_summary(vault_id, start_date, end_date, cycle_windows)
+    )
+    actual_spend = number(summary["cash_outflow"])
+    projected_spend = number(summary["net_personal_cost"])
+    difference = round(actual_spend - projected_spend, 2)
+    percent_lower = round(difference / actual_spend * 100) if actual_spend else 0
+    comparison_label = (
+        f"{difference:,.0f} less than actual spend"
+        if difference > 0
+        else f"{abs(difference):,.0f} more than actual spend"
+        if difference < 0
+        else "Matches actual spend"
+    )
+
+    you_paid, partner_paid, top_expenses = aggregate_shared_expense_context(
+        vault_id,
+        start_date,
+        end_date,
+    )
+    total_paid = you_paid + partner_paid
+    you_percent = round(you_paid / total_paid * 100) if total_paid else 0
+    partner_percent = 100 - you_percent if total_paid else 0
+
+    payable = number(summary["outstanding_payables"])
+    receivable = number(summary["outstanding_receivables"])
+    if receivable > payable:
+        current_label = "Partner owes you"
+        current_amount = round(receivable - payable, 2)
+    elif payable > receivable:
+        current_label = "You owe partner"
+        current_amount = round(payable - receivable, 2)
+    else:
+        current_label = "All balances settled"
+        current_amount = 0
+
+    cash_rows = category_rows(
+        to_json_safe(
+            get_cash_outflow_category_breakdown(
+                vault_id,
+                start_date,
+                end_date,
+            )
+        )
+    )
+    net_rows = category_rows(
+        to_json_safe(
+            get_net_personal_category_breakdown(
+                vault_id,
+                start_date,
+                end_date,
+            )
+        )
+    )
+
+    return ReportSharedData(
+        hero=ReportSharedHero(
+            projectedPersonalSpend=projected_spend,
+            actualSpend=actual_spend,
+            difference=difference,
+            percentLower=percent_lower,
+            comparisonLabel=comparison_label,
+        ),
+        settlementOverview=[
+            ReportSharedSettlementCard(
+                key="you-paid",
+                label="You Paid",
+                amount=you_paid,
+                caption=f"{you_percent}% of shared expenses",
+                tone="purple",
+            ),
+            ReportSharedSettlementCard(
+                key="partner-paid",
+                label="Partner Paid",
+                amount=partner_paid,
+                caption=f"{partner_percent}% of shared expenses",
+                tone="blue",
+            ),
+            ReportSharedSettlementCard(
+                key="you-owe",
+                label="You Owe",
+                amount=payable,
+                caption="To partner",
+                tone="orange",
+            ),
+            ReportSharedSettlementCard(
+                key="you-are-owed",
+                label="You're Owed",
+                amount=receivable,
+                caption="From partner",
+                tone="green",
+            ),
+        ],
+        categoryImpact=merge_category_impact(cash_rows, net_rows),
+        settlementPreview=ReportSharedSettlementPreview(
+            currentLabel=current_label,
+            currentAmount=current_amount,
+            projectedPersonalSpend=projected_spend,
+        ),
+        contribution=ReportSharedContribution(
+            total=total_paid,
+            items=[
+                ReportSharedContributionItem(
+                    key="you",
+                    label="You",
+                    amount=you_paid,
+                    percent=you_percent,
+                    color=SHARED_CONTRIBUTION_COLORS["you"],
+                ),
+                ReportSharedContributionItem(
+                    key="partner",
+                    label="Partner",
+                    amount=partner_paid,
+                    percent=partner_percent,
+                    color=SHARED_CONTRIBUTION_COLORS["partner"],
+                ),
+            ],
+        ),
+        topExpenses=[
+            ReportSharedExpenseItem(
+                id=item["id"],
+                icon=item["icon"],
+                name=item["name"],
+                date=item["date"],
+                amount=item["amount"],
+            )
+            for item in top_expenses
+        ],
+    )
+
+
+@router.get("/shared", response_model=ReportSharedResponse, response_model_by_alias=True)
+def reports_shared(
+    cycle_start: str | None = Query(default=None, alias="cycleStart"),
+    vault: VaultContext = Depends(get_authenticated_vault),
+):
+    vault_id = int_vault_id(vault)
+    selected_cycle = select_cycle(vault_id, cycle_start)
+    context = report_period_context(vault_id, selected_cycle)
+
+    return ReportSharedResponse(
+        generatedAt=datetime.now(timezone.utc),
+        vault=vault,
+        filters=ReportFilters(
+            period="cycle",
+            cycleStart=selected_cycle.start_iso,
+            startDate=selected_cycle.start_iso,
+            endDate=selected_cycle.end_iso,
+        ),
+        data=shared_report_payload(vault_id, selected_cycle, context),
+    )
 
 
 @router.get("/spending", response_model=ReportSpendingResponse, response_model_by_alias=True)

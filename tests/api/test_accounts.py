@@ -57,7 +57,7 @@ def test_create_account_accepts_legacy_account_types(monkeypatch):
         )
     )
 
-    for account_type in ("Salary Account", "Savings Account", "Credit Card", "Cash", "Other"):
+    for account_type in ("Salary Account", "Savings Account", "Credit Card", "Cash", "Wallet", "Other"):
         response = client.post(
             "/api/accounts",
             headers=auth_header(),
@@ -66,7 +66,7 @@ def test_create_account_accepts_legacy_account_types(monkeypatch):
 
         assert response.status_code == 200
 
-    assert [item["account_type"] for item in observed] == ["Salary Account", "Savings Account", "Credit Card", "Cash", "Other"]
+    assert [item["account_type"] for item in observed] == ["Salary Account", "Savings Account", "Credit Card", "Cash", "Wallet", "Other"]
 
 
 def test_create_account_rejects_missing_account_type(monkeypatch):
@@ -152,21 +152,25 @@ def test_non_credit_card_opening_balance_cannot_be_negative(monkeypatch):
     }
 
 
-def test_opening_balance_zero_is_rejected(monkeypatch):
+def test_opening_balance_zero_is_allowed_for_non_credit_cards(monkeypatch):
     client = build_client(monkeypatch)
+    observed = []
+
+    monkeypatch.setattr(
+        "api.accounts.add_account",
+        lambda vault_id, name, account_type, opening_balance, is_primary: observed.append(opening_balance),
+    )
 
     for value in (0, 0.0, -0.0, "0", "0.00", "-0"):
         response = client.post(
             "/api/accounts",
             headers=auth_header(),
-            json=account_payload(openingBalance=value)
+            json=account_payload(type="Wallet", openingBalance=value, name=f"Wallet {value}"),
         )
 
-        assert response.status_code == 400
-        assert response.json() == {
-            "code": "VALIDATION_ERROR",
-            "message": "Opening balance must be greater than zero."
-        }
+        assert response.status_code == 200
+
+    assert observed == [0, 0.0, 0.0, 0, 0.0, 0.0]
 
 
 def test_opening_balance_non_finite_values_are_rejected(monkeypatch):

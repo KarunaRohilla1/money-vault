@@ -41,9 +41,6 @@ def validate_account_payload(request):
     if not math.isfinite(request.opening_balance):
         raise bad_request("Opening balance must be a number.")
 
-    if request.opening_balance == 0:
-        raise bad_request("Opening balance must be greater than zero.")
-
     if account_type != "Credit Card" and request.opening_balance < 0:
         raise bad_request("Opening balance cannot be negative.")
 

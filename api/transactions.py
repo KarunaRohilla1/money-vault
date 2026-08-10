@@ -340,11 +340,19 @@ def transaction_month_range(vault: VaultContext = Depends(get_authenticated_vaul
     )
 
 
-@router.get("/{transaction_id}", response_model=TransactionDetailResponse, response_model_by_alias=True)
-def transaction_detail(transaction_id: int, vault: VaultContext = Depends(get_authenticated_vault)):
+def require_owned_transaction(transaction_id, vault):
+    origin_vault_id = transaction_origin_vault_id(vault)
     require_transaction(
         transaction_id,
-        int_vault_id(vault)
+        origin_vault_id
+    )
+
+
+@router.get("/{transaction_id}", response_model=TransactionDetailResponse, response_model_by_alias=True)
+def transaction_detail(transaction_id: int, vault: VaultContext = Depends(get_authenticated_vault)):
+    require_owned_transaction(
+        transaction_id,
+        vault
     )
     return adapt_transaction_detail(get_transaction_by_id(transaction_id))
 
@@ -402,9 +410,9 @@ def update_transaction_route(
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
     vault_id = transaction_origin_vault_id(vault)
-    require_transaction(
+    require_owned_transaction(
         transaction_id,
-        vault_id
+        vault
     )
     require_account(
         request.account_id,
@@ -449,9 +457,9 @@ def update_transaction_route(
 
 @router.delete("/{transaction_id}", response_model=SuccessResponse, response_model_by_alias=True)
 def delete_transaction_route(transaction_id: int, vault: VaultContext = Depends(get_authenticated_vault)):
-    require_transaction(
+    require_owned_transaction(
         transaction_id,
-        int_vault_id(vault)
+        vault
     )
     delete_transaction(transaction_id)
     return SuccessResponse()

@@ -787,10 +787,80 @@ class SharedSettlementRequest(BaseModel):
     amount: float = Field(gt=0)
     from_account_id: int = Field(alias="fromAccountId")
     from_vault_id: int = Field(alias="fromVaultId")
+    notes: Optional[str] = None
+    payment_method: Optional[str] = Field(default=None, alias="paymentMethod")
     settlement_date: str = Field(alias="settlementDate", min_length=1)
     shared_vault_id: int = Field(alias="sharedVaultId")
     to_account_id: int = Field(alias="toAccountId")
     to_vault_id: int = Field(alias="toVaultId")
+
+
+class ReportSharedHero(BaseModel):
+    projected_personal_spend: float = Field(alias="projectedPersonalSpend")
+    actual_spend: float = Field(alias="actualSpend")
+    difference: float
+    percent_lower: int = Field(alias="percentLower")
+    comparison_label: str = Field(alias="comparisonLabel")
+
+
+class ReportSharedContributionItem(BaseModel):
+    key: str
+    label: str
+    amount: float
+    percent: int
+    color: str
+
+
+class ReportSharedContribution(BaseModel):
+    total: float
+    items: List[ReportSharedContributionItem]
+
+
+class ReportSharedCategoryImpactItem(BaseModel):
+    key: str
+    icon: str
+    name: str
+    actual_amount: float = Field(alias="actualAmount")
+    projected_amount: float = Field(alias="projectedAmount")
+    difference: float
+
+
+class ReportSharedSettlementPreview(BaseModel):
+    current_label: str = Field(alias="currentLabel")
+    current_amount: float = Field(alias="currentAmount")
+    projected_personal_spend: float = Field(alias="projectedPersonalSpend")
+
+
+class ReportSharedSettlementCard(BaseModel):
+    key: str
+    label: str
+    amount: float
+    caption: str
+    tone: str
+
+
+class ReportSharedExpenseItem(BaseModel):
+    id: int
+    icon: str
+    name: str
+    date: str
+    amount: float
+
+
+class ReportSharedData(BaseModel):
+    hero: ReportSharedHero
+    settlement_overview: List[ReportSharedSettlementCard] = Field(alias="settlementOverview")
+    category_impact: List[ReportSharedCategoryImpactItem] = Field(alias="categoryImpact")
+    settlement_preview: ReportSharedSettlementPreview = Field(alias="settlementPreview")
+    contribution: ReportSharedContribution
+    top_expenses: List[ReportSharedExpenseItem] = Field(alias="topExpenses")
+
+
+class ReportSharedResponse(BaseModel):
+    generated_at: datetime = Field(alias="generatedAt")
+    vault: VaultContext
+    filters: ReportFilters
+    data: ReportSharedData
 
 
 class SharedPageResponse(BaseModel):

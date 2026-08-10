@@ -178,7 +178,7 @@ def test_shared_dashboard_composes_legacy_shared_helpers(monkeypatch):
     )
     monkeypatch.setattr(
         "api.shared.settlement_summary_with_accounts",
-        lambda vault_id: {
+        lambda vault_id, **kwargs: {
             "label": "Owed to You:",
             "amount": 200,
             "direction": "receivable",
@@ -470,7 +470,7 @@ def test_shared_settlement_uses_legacy_settle_function(monkeypatch):
     )
     monkeypatch.setattr(
         "api.shared.settle_outstanding_settlement",
-        lambda shared_vault_id, from_vault_id, from_account_id, to_vault_id, to_account_id, amount, settlement_date: observed.update(
+        lambda shared_vault_id, from_vault_id, from_account_id, to_vault_id, to_account_id, amount, settlement_date, **kwargs: observed.update(
             {
                 "amount": amount,
                 "from_account_id": from_account_id,

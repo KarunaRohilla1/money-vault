@@ -83,73 +83,20 @@ def split_label_for_shares(transaction_amount, shares):
     return "Equal"
 
 
-def get_settlement_adjustments_with_cursor(
+def _shared_expense_date_clause(start_date, end_date):
+    if start_date is None:
+        return "AND date <= ?", (end_date,)
+
+    return "AND date BETWEEN ? AND ?", (start_date, end_date)
+
+
+def _accumulate_shared_expense_totals(
     cursor,
+    shared_vault_id,
     participant_ids,
-    shared_vault_id,
-    start_date,
-    end_date
+    end_date,
+    start_date=None
 ):
-    adjustments = {
-        participant_id: 0
-        for participant_id in participant_ids
-    }
-
-    rows = cursor.execute(
-        """
-        SELECT
-            vault_id,
-            transaction_type,
-            amount
-        FROM transactions
-        WHERE beneficiary_vault_id = ?
-        AND is_deleted = 0
-        AND transaction_type IN (?, ?)
-        AND COALESCE(notes, '') LIKE 'Shared settlement:%'
-        AND date BETWEEN ? AND ?
-        """,
-        (
-            shared_vault_id,
-            TRANSFER_IN,
-            TRANSFER_OUT,
-            start_date,
-            end_date
-        )
-    ).fetchall()
-
-    for row in rows:
-        participant_id = row[0]
-        if participant_id not in adjustments:
-            continue
-
-        amount_cents = cents(row[2])
-
-        if row[1] == TRANSFER_IN:
-            adjustments[participant_id] -= amount_cents
-        elif row[1] == TRANSFER_OUT:
-            adjustments[participant_id] += amount_cents
-
-    return adjustments
-
-
-def get_shared_balances_with_cursor(
-    cursor,
-    shared_vault_id,
-    start_date,
-    end_date
-):
-    participants = get_shared_participants_with_cursor(
-        cursor,
-        shared_vault_id
-    )
-    participant_ids = [
-        participant[0]
-        for participant in participants
-    ]
-    participant_names = {
-        participant[0]: participant[1]
-        for participant in participants
-    }
     paid_cents = {
         participant_id: 0
         for participant_id in participant_ids
@@ -158,9 +105,13 @@ def get_shared_balances_with_cursor(
         participant_id: 0
         for participant_id in participant_ids
     }
+    date_clause, date_params = _shared_expense_date_clause(
+        start_date,
+        end_date
+    )
 
     transaction_rows = cursor.execute(
-        """
+        f"""
         SELECT
             id,
             vault_id,
@@ -169,14 +120,13 @@ def get_shared_balances_with_cursor(
         WHERE beneficiary_vault_id = ?
         AND is_deleted = 0
         AND transaction_type = ?
-        AND date BETWEEN ? AND ?
+        {date_clause}
         ORDER BY date DESC, id DESC
         """,
         (
             shared_vault_id,
             EXPENSE,
-            start_date,
-            end_date
+            *date_params
         )
     ).fetchall()
 
@@ -237,20 +187,121 @@ def get_shared_balances_with_cursor(
                 if index == len(participant_ids) - 1:
                     share_cents[participant_id] += remainder
 
-    settlement_adjustments = get_settlement_adjustments_with_cursor(
-        cursor,
-        participant_ids,
-        shared_vault_id,
+    return paid_cents, share_cents
+
+
+def get_settlement_adjustments_with_cursor(
+    cursor,
+    participant_ids,
+    shared_vault_id,
+    end_date,
+    start_date=None
+):
+    adjustments = {
+        participant_id: 0
+        for participant_id in participant_ids
+    }
+    date_clause, date_params = _shared_expense_date_clause(
         start_date,
         end_date
     )
+
+    rows = cursor.execute(
+        f"""
+        SELECT
+            vault_id,
+            transaction_type,
+            amount
+        FROM transactions
+        WHERE beneficiary_vault_id = ?
+        AND is_deleted = 0
+        AND transaction_type IN (?, ?)
+        AND COALESCE(notes, '') LIKE 'Shared settlement:%'
+        {date_clause}
+        """,
+        (
+            shared_vault_id,
+            TRANSFER_IN,
+            TRANSFER_OUT,
+            *date_params
+        )
+    ).fetchall()
+
+    for row in rows:
+        participant_id = row[0]
+        if participant_id not in adjustments:
+            continue
+
+        amount_cents = cents(row[2])
+
+        if row[1] == TRANSFER_IN:
+            adjustments[participant_id] -= amount_cents
+        elif row[1] == TRANSFER_OUT:
+            adjustments[participant_id] += amount_cents
+
+    return adjustments
+
+
+def get_shared_balances_with_cursor(
+    cursor,
+    shared_vault_id,
+    start_date,
+    end_date,
+    *,
+    carry_forward_unsettled=True
+):
+    participants = get_shared_participants_with_cursor(
+        cursor,
+        shared_vault_id
+    )
+    participant_ids = [
+        participant[0]
+        for participant in participants
+    ]
+    participant_names = {
+        participant[0]: participant[1]
+        for participant in participants
+    }
+    cycle_paid_cents, cycle_share_cents = _accumulate_shared_expense_totals(
+        cursor,
+        shared_vault_id,
+        participant_ids,
+        end_date,
+        start_date
+    )
+
+    if carry_forward_unsettled:
+        balance_paid_cents, balance_share_cents = _accumulate_shared_expense_totals(
+            cursor,
+            shared_vault_id,
+            participant_ids,
+            end_date,
+            start_date=None
+        )
+        settlement_adjustments = get_settlement_adjustments_with_cursor(
+            cursor,
+            participant_ids,
+            shared_vault_id,
+            end_date,
+            start_date=None
+        )
+    else:
+        balance_paid_cents = cycle_paid_cents
+        balance_share_cents = cycle_share_cents
+        settlement_adjustments = get_settlement_adjustments_with_cursor(
+            cursor,
+            participant_ids,
+            shared_vault_id,
+            end_date,
+            start_date=start_date
+        )
 
     balances = []
     for participant in participants:
         participant_id = participant[0]
         balance_cents = (
-            paid_cents.get(participant_id, 0)
-            - share_cents.get(participant_id, 0)
+            balance_paid_cents.get(participant_id, 0)
+            - balance_share_cents.get(participant_id, 0)
             + settlement_adjustments.get(participant_id, 0)
         )
         balances.append({
@@ -260,10 +311,10 @@ def get_shared_balances_with_cursor(
                 participant[1]
             ),
             "paid": money_from_cents(
-                paid_cents.get(participant_id, 0)
+                cycle_paid_cents.get(participant_id, 0)
             ),
             "share": money_from_cents(
-                share_cents.get(participant_id, 0)
+                cycle_share_cents.get(participant_id, 0)
             ),
             "balance": money_from_cents(balance_cents)
         })
@@ -745,15 +796,20 @@ def settle_outstanding_settlement(
     to_vault_id,
     to_account_id,
     amount,
-    settlement_date
+    settlement_date,
+    payment_method=None,
+    notes=None,
 ):
     amount = as_money(amount)
     if amount <= 0:
         raise ValueError("Settlement amount must be greater than zero.")
 
+    from db.settlements import create_settlement_record, ensure_settlements_schema_with_cursor
+
     conn = get_connection()
     try:
         cursor = conn.cursor()
+        ensure_settlements_schema_with_cursor(cursor)
         validate_settlement_account_with_cursor(
             cursor,
             from_vault_id,
@@ -788,9 +844,21 @@ def settle_outstanding_settlement(
         transfer_group_id = str(
             uuid.uuid4()
         )
-        notes = (
+        settlement_notes = notes or (
             "Shared settlement: "
             f"{from_name[0]} paid {to_name[0]}"
+        )
+
+        create_settlement_record(
+            cursor,
+            shared_vault_id=shared_vault_id,
+            from_participant_id=from_vault_id,
+            to_participant_id=to_vault_id,
+            amount=amount,
+            settlement_date=settlement_date,
+            transfer_group_id=transfer_group_id,
+            payment_method=payment_method,
+            notes=settlement_notes,
         )
 
         cursor.execute(
@@ -815,7 +883,7 @@ def settle_outstanding_settlement(
                 settlement_date,
                 amount,
                 TRANSFER_OUT,
-                notes,
+                settlement_notes,
                 transfer_group_id
             )
             ,
@@ -843,7 +911,7 @@ def settle_outstanding_settlement(
                 settlement_date,
                 amount,
                 TRANSFER_IN,
-                notes,
+                settlement_notes,
                 transfer_group_id
             )
             ,
@@ -1004,6 +1072,7 @@ def get_shared_expenses_page_data(
                 t.id,
                 t.date,
                 t.vault_id,
+                t.account_id,
                 COALESCE(payer.name, 'Unknown') AS payer_name,
                 t.amount,
                 t.allocation_method,
@@ -1063,7 +1132,8 @@ def get_shared_expenses_page_data(
         for transaction in transactions:
             transaction_id = transaction[0]
             payer_id = transaction[2]
-            amount = as_money(transaction[4])
+            account_id = transaction[3]
+            amount = as_money(transaction[5])
             total_spend = as_money(total_spend + amount)
 
             if payer_id == current_participant_id:
@@ -1140,14 +1210,16 @@ def get_shared_expenses_page_data(
                 "id": transaction_id,
                 "date": transaction[1],
                 "paid_by_id": payer_id,
-                "paid_by": transaction[3],
+                "paid_by": transaction[4],
+                "account_id": account_id,
                 "amount": amount,
-                "allocation_method": transaction[5] or "Equal",
-                "notes": transaction[6],
-                "merchant": transaction[6] or transaction[8],
-                "category_id": transaction[7],
-                "category": transaction[8],
-                "category_icon": transaction[9],
+                "allocation_method": transaction[6] or "Equal",
+                "notes": transaction[7],
+                "merchant": transaction[7] or transaction[9],
+                "category_id": transaction[8],
+                "category": transaction[9],
+                "category_icon": transaction[10],
+                "shares": shares,
                 "split_label": split_label_for_shares(
                     amount,
                     shares

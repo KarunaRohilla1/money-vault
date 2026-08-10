@@ -191,7 +191,10 @@ def build_shared_dashboard_payload(vault, shared_vault_id):
         end_date
     )
     settlement = settlement_summary_with_accounts(
-        personal_vault_id
+        personal_vault_id,
+        shared_vault_id=shared_vault_id,
+        start_date=start_date,
+        end_date=end_date
     )
     participants = shared_summary["participants"]
     current_participant = next(
@@ -323,16 +326,26 @@ def adapt_settlement_account(row):
     }
 
 
-def settlement_summary_with_accounts(vault_id):
-    cycle = get_current_cycle(vault_id)
+def settlement_summary_with_accounts(vault_id, shared_vault_id=None, start_date=None, end_date=None):
+    if start_date and end_date:
+        cycle_start = start_date
+        cycle_end = end_date
+    else:
+        cycle = get_current_cycle(shared_vault_id or vault_id)
+        cycle_start = cycle.start_iso
+        cycle_end = cycle.end_iso
+
     summary = get_settlement_summary(
         vault_id,
-        cycle.start_iso,
-        cycle.end_iso
+        cycle_start,
+        cycle_end
     )
 
     items = []
     for item in summary["items"]:
+        if shared_vault_id is not None and int(item["shared_vault_id"]) != int(shared_vault_id):
+            continue
+
         items.append({
             **item,
             "from_accounts": [
@@ -345,8 +358,44 @@ def settlement_summary_with_accounts(vault_id):
             ]
         })
 
+    if shared_vault_id is None:
+        return {
+            **summary,
+            "items": items
+        }
+
+    receivable = sum(
+        float(item["amount"] or 0)
+        for item in items
+        if item["direction"] == "receivable"
+    )
+    payable = sum(
+        float(item["amount"] or 0)
+        for item in items
+        if item["direction"] == "payable"
+    )
+    net = receivable - payable
+
+    if net > 0:
+        label = "Owed to You:"
+        amount = net
+        direction = "receivable"
+    elif net < 0:
+        label = "You Owe:"
+        amount = abs(net)
+        direction = "payable"
+    else:
+        label = "All Settled"
+        amount = 0
+        direction = "settled"
+
     return {
-        **summary,
+        "label": label,
+        "amount": amount,
+        "direction": direction,
+        "receivable": receivable,
+        "payable": payable,
+        "net": net,
         "items": items
     }
 
@@ -401,10 +450,53 @@ def shared_expenses(
 
 
 @router.get("/settlements", response_model=SharedPageResponse, response_model_by_alias=True)
-def shared_settlements(vault: VaultContext = Depends(get_authenticated_vault)):
+def shared_settlements(
+    shared_vault_id: Optional[int] = Query(default=None, alias="sharedVaultId"),
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    personal_vault_id = current_personal_vault_id(vault)
+
+    if vault.vault_type == "Shared":
+        selected_id = resolve_shared_vault_id(
+            int_vault_id(vault),
+            shared_vault_id
+        )
+        cycle = get_current_cycle(selected_id)
+        return SharedPageResponse(
+            data=settlement_summary_with_accounts(
+                personal_vault_id,
+                shared_vault_id=selected_id,
+                start_date=cycle.start_iso,
+                end_date=cycle.end_iso
+            )
+        )
+
     return SharedPageResponse(
-        data=settlement_summary_with_accounts(
-            int_vault_id(vault)
+        data=settlement_summary_with_accounts(personal_vault_id)
+    )
+
+
+@router.get("/settlements/history", response_model=SharedPageResponse, response_model_by_alias=True)
+def shared_settlement_history(
+    shared_vault_id: Optional[int] = Query(default=None, alias="sharedVaultId"),
+    direction: Optional[str] = Query(default="all"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    from db.settlements import get_settlement_history
+
+    selected_id = resolve_shared_vault_id(
+        int_vault_id(vault),
+        shared_vault_id
+    )
+    return SharedPageResponse(
+        data=get_settlement_history(
+            selected_id,
+            current_personal_vault_id(vault),
+            direction=direction or "all",
+            limit=limit,
+            offset=offset,
         )
     )
 
@@ -586,7 +678,9 @@ def mark_shared_settlement_route(
             request.to_vault_id,
             request.to_account_id,
             request.amount,
-            request.settlement_date
+            request.settlement_date,
+            payment_method=request.payment_method,
+            notes=request.notes,
         )
     except ValueError as error:
         raise bad_request(str(error)) from error
