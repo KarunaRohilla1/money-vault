@@ -1,15 +1,17 @@
 import os
+import time
 from pathlib import Path
 from functools import lru_cache
 
 try:
     import psycopg2
     from psycopg2 import errors
-    from psycopg2.pool import SimpleConnectionPool
+    from psycopg2.pool import PoolError, ThreadedConnectionPool
 except ImportError:
     psycopg2 = None
     errors = None
-    SimpleConnectionPool = None
+    PoolError = Exception
+    ThreadedConnectionPool = None
 
 from db.cache import cache_resource
 
@@ -37,24 +39,9 @@ def get_database_url():
         if value:
             return value
 
-    try:
-        import streamlit as st
-
-        for key in (
-            "SUPABASE_DB_URL",
-            "DATABASE_URL"
-        ):
-            value = st.secrets.get(key)
-            if value:
-                return value
-
-    except Exception:
-        pass
-
     raise RuntimeError(
         "Supabase PostgreSQL credentials are not configured. "
-        "Set SUPABASE_DB_URL or DATABASE_URL in environment variables "
-        "or Streamlit secrets."
+        "Set SUPABASE_DB_URL or DATABASE_URL in environment variables."
     )
 
 
@@ -70,18 +57,6 @@ def get_supabase_client():
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get(
         "SUPABASE_ANON_KEY"
     )
-
-    try:
-        import streamlit as st
-
-        url = url or st.secrets.get("SUPABASE_URL")
-        key = (
-            key
-            or st.secrets.get("SUPABASE_SERVICE_ROLE_KEY")
-            or st.secrets.get("SUPABASE_ANON_KEY")
-        )
-    except Exception:
-        pass
 
     if not url or not key:
         raise RuntimeError(
@@ -121,26 +96,36 @@ def is_raw_connection_open(raw_connection):
 
 
 def is_raw_connection_usable(raw_connection):
-    if not is_raw_connection_open(raw_connection):
-        return False
+    return is_raw_connection_open(raw_connection)
 
-    try:
-        with raw_connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-        raw_connection.rollback()
-        return True
-    except Exception:
+
+def acquire_raw_connection_with_timeout(pool, timeout=20.0):
+    deadline = time.time() + timeout
+    while True:
         try:
-            raw_connection.rollback()
-        except Exception:
-            pass
-        return False
+            return pool.getconn()
+        except PoolError:
+            if time.time() >= deadline:
+                raise RuntimeError(
+                    f"Connection pool exhausted after waiting {timeout:.1f}s."
+                )
+            time.sleep(0.02)
 
 
-def get_healthy_pool_connection(pool):
+def get_healthy_pool_connection(pool, timeout=None):
+    if timeout is None:
+        try:
+            timeout = float(os.environ.get("POSTGRES_POOL_TIMEOUT", "20.0"))
+        except (ValueError, TypeError):
+            timeout = 20.0
+
+    deadline = time.time() + timeout
     for _attempt in range(2):
-        raw_connection = pool.getconn()
+        remaining = max(deadline - time.time(), 0.05)
+        raw_connection = acquire_raw_connection_with_timeout(
+            pool,
+            timeout=remaining
+        )
 
         if is_raw_connection_usable(raw_connection):
             return raw_connection
@@ -185,9 +170,9 @@ def get_connection_pool():
             "require"
         )
 
-    return SimpleConnectionPool(
+    return ThreadedConnectionPool(
         int(os.environ.get("POSTGRES_POOL_MIN", "1")),
-        int(os.environ.get("POSTGRES_POOL_MAX", "5")),
+        int(os.environ.get("POSTGRES_POOL_MAX", "15")),
         database_url,
         **connect_kwargs
     )

@@ -444,3 +444,101 @@ def test_delete_shared_transaction_from_shared_vault_session(monkeypatch):
         "deleted": 101,
         "vault_id": 4
     }
+
+
+def test_transaction_detail_returns_shares_for_shared_transaction(monkeypatch):
+    client = build_client(monkeypatch)
+
+    monkeypatch.setattr("api.transactions.require_transaction", lambda transaction_id, vault_id: None)
+    monkeypatch.setattr(
+        "api.transactions.get_transaction_by_id",
+        lambda tx_id: (tx_id, 1, 2, "2026-07-17", 1000.0, "Expense", "Dinner", 40, "Equal")
+    )
+    monkeypatch.setattr(
+        "api.transactions.get_transaction_shares",
+        lambda tx_id: [
+            (1, tx_id, 4, "Karuna", 500.0, 50.0),
+            (2, tx_id, 5, "Asfar", 500.0, 50.0),
+        ]
+    )
+
+    response = client.get(
+        "/api/transactions/1",
+        headers=auth_header(vault_id="4")
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == 1
+    assert data["amount"] == 1000.0
+    assert len(data["shares"]) == 2
+    assert data["shares"][0]["participantVaultId"] == 4
+    assert data["shares"][0]["shareAmount"] == 500.0
+
+
+def test_transaction_belongs_to_vault_regression_rules(monkeypatch):
+    import sqlite3
+    from api.resources import transaction_belongs_to_vault
+
+    conn = sqlite3.connect(":memory:")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE transactions (
+            id INTEGER PRIMARY KEY,
+            vault_id INTEGER NOT NULL,
+            beneficiary_vault_id INTEGER,
+            is_deleted INTEGER DEFAULT 0
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE transaction_shares (
+            id INTEGER PRIMARY KEY,
+            transaction_id INTEGER NOT NULL,
+            participant_vault_id INTEGER NOT NULL,
+            share_amount REAL NOT NULL,
+            share_percentage REAL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE vault_shares (
+            id INTEGER PRIMARY KEY,
+            vault_id INTEGER NOT NULL,
+            shared_vault_id INTEGER NOT NULL
+        )
+    """)
+
+    # Tx 1: personal transaction belonging to Vault 1
+    cursor.execute("INSERT INTO transactions (id, vault_id, beneficiary_vault_id, is_deleted) VALUES (1, 1, 1, 0)")
+    # Tx 2: shared transaction paid by Vault 2 on behalf of Shared Vault 3, split between Vault 1 and Vault 2
+    cursor.execute("INSERT INTO transactions (id, vault_id, beneficiary_vault_id, is_deleted) VALUES (2, 2, 3, 0)")
+    cursor.execute("INSERT INTO transaction_shares (id, transaction_id, participant_vault_id, share_amount, share_percentage) VALUES (1, 2, 1, 500.0, 50.0)")
+    cursor.execute("INSERT INTO transaction_shares (id, transaction_id, participant_vault_id, share_amount, share_percentage) VALUES (2, 2, 2, 500.0, 50.0)")
+    # Vault 1 and Vault 2 are members of Shared Vault 3
+    cursor.execute("INSERT INTO vault_shares (id, vault_id, shared_vault_id) VALUES (1, 3, 1)")
+    cursor.execute("INSERT INTO vault_shares (id, vault_id, shared_vault_id) VALUES (2, 3, 2)")
+    conn.commit()
+
+    class FakeConnWrapper:
+        def __init__(self, c):
+            self._c = c
+        def execute(self, sql, params=()):
+            return self._c.cursor().execute(sql, tuple(params))
+        def close(self):
+            pass
+
+    monkeypatch.setattr("api.resources.get_connection", lambda: FakeConnWrapper(conn))
+
+    # Test 1: Owner of personal transaction has access
+    assert transaction_belongs_to_vault(1, 1) is True
+    # Test 2: Non-owner has no access to personal transaction
+    assert transaction_belongs_to_vault(1, 2) is False
+    assert transaction_belongs_to_vault(1, 99) is False
+
+    # Test 3: Payer of shared transaction has access
+    assert transaction_belongs_to_vault(2, 2) is True
+    # Test 4: Non-payer participant in shared transaction has access via transaction_shares and vault_shares
+    assert transaction_belongs_to_vault(2, 1) is True
+    # Test 5: Unrelated vault has no access to shared transaction
+    assert transaction_belongs_to_vault(2, 99) is False
+

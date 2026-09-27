@@ -14,15 +14,14 @@ from api.schemas import (
     ReportFinancialReview,
     ReportMoneyCard,
     ReportReviewItem,
-    ReportSharedCategoryImpactItem,
-    ReportSharedContribution,
-    ReportSharedContributionItem,
+    ReportSharedCategoryBreakdownItem,
     ReportSharedData,
     ReportSharedExpenseItem,
-    ReportSharedHero,
+    ReportSharedParticipantFunding,
     ReportSharedResponse,
-    ReportSharedSettlementCard,
-    ReportSharedSettlementPreview,
+    ReportSharedSummary,
+    ReportSharedTrendPoint,
+    ReportSpendComparison,
     ReportSpendingComparison,
     ReportSpendingData,
     ReportSpendingBreakdown,
@@ -42,8 +41,11 @@ from api.schemas import (
 )
 from db.core import EXPENSE, get_connection
 from db.shared_expenses import (
+    _accumulate_shared_expense_totals,
     get_shared_expenses_page_data,
+    get_shared_participants_with_cursor,
     get_shared_vaults_for_personal_with_cursor,
+    money_from_cents,
 )
 from db.financial_cycles import (
     add_months,
@@ -52,7 +54,7 @@ from db.financial_cycles import (
     get_current_cycle,
     get_cycle_for_date,
 )
-from views.reports import (
+from api.report_data import (
     get_cash_outflow_category_breakdown,
     get_monthly_trend,
     get_net_personal_category_breakdown,
@@ -259,7 +261,7 @@ def shared_insights(summary, shared):
         return []
     return [
         ReportReviewItem(key="paid-by-you", label="Paid by you", value=number(summary["shared_expenses_paid"]), format="money"),
-        ReportReviewItem(key="received-by-you", label="Received by you", value=number(summary["shared_expenses_received"]), format="money"),
+        ReportReviewItem(key="received-by-you", label="Covered for you", value=number(summary["shared_expenses_received"]), format="money"),
         ReportReviewItem(key="you-owe", label="You owe", value=number(summary["outstanding_payables"]), format="money"),
         ReportReviewItem(key="you-are-owed", label="You are owed", value=number(summary["outstanding_receivables"]), format="money"),
         ReportReviewItem(key="settlements-completed", label="Settlements completed", value=number(summary["settlements_completed"]), format="money"),
@@ -599,7 +601,7 @@ def spending_summary_for_dimension(dimension, current, previous, selected_cycle,
     ]
 
 
-def spending_analytics_data(dimension, current, previous, selected_cycle, previous_label, vault_id, shared, filters):
+def spending_analytics_data(dimension, current, previous, selected_cycle, previous_label, vault_id, shared, filters, spend_comparison=None):
     config = dimension_config(dimension)
     items = analytics_items(current[config["rows_key"]])
     total = sum(item.amount for item in items)
@@ -608,6 +610,7 @@ def spending_analytics_data(dimension, current, previous, selected_cycle, previo
         visualization=ReportSpendingVisualization(type=config["chart"], title=config["title"], total=total, items=items),
         trend=ReportSpendingTrend(title=f"{config['title']} Trend", points=trend_points(current["daily"])),
         breakdown=analytics_breakdown(config["breakdown"], items, lambda item: f"{item.transaction_count} transactions"),
+        spendComparison=spend_comparison,
         metadata=ReportSpendingMetadata(
             dimension=dimension,
             question=config["question"],
@@ -671,253 +674,237 @@ def reports(
 
 
 
-SHARED_CONTRIBUTION_COLORS = {
-    "you": "#8B5CF6",
-    "partner": "#2563EB",
-}
-
-
-def normalize_category_key(name):
-    return str(name or "Others").strip().lower()
-
-
-def merge_category_impact(cash_rows, net_rows):
-    actual_by_name = {
-        normalize_category_key(row.name): row
-        for row in cash_rows
-    }
-    projected_by_name = {
-        normalize_category_key(row.name): row
-        for row in net_rows
-    }
-    names = sorted(set(actual_by_name) | set(projected_by_name))
-    items = []
-
-    for index, name_key in enumerate(names):
-        actual_row = actual_by_name.get(name_key)
-        projected_row = projected_by_name.get(name_key)
-        actual_amount = number(actual_row.amount if actual_row else 0)
-        projected_amount = number(projected_row.amount if projected_row else 0)
-        display_name = (
-            projected_row.name
-            if projected_row
-            else actual_row.name
-            if actual_row
-            else "Others"
-        )
-        icon = (
-            projected_row.icon
-            if projected_row
-            else actual_row.icon
-            if actual_row
-            else "label"
-        )
-        items.append(
-            ReportSharedCategoryImpactItem(
-                key=category_key(display_name, index),
-                icon=icon,
-                name=display_name,
-                actualAmount=actual_amount,
-                projectedAmount=projected_amount,
-                difference=round(actual_amount - projected_amount, 2),
-            )
-        )
-
-    items.sort(key=lambda item: item.actual_amount, reverse=True)
-    primary = items[:5]
-    remainder = items[5:]
-
-    if remainder:
-        primary.append(
-            ReportSharedCategoryImpactItem(
-                key="category:others",
-                icon="label",
-                name="Others",
-                actualAmount=round(sum(item.actual_amount for item in remainder), 2),
-                projectedAmount=round(sum(item.projected_amount for item in remainder), 2),
-                difference=round(
-                    sum(item.actual_amount for item in remainder)
-                    - sum(item.projected_amount for item in remainder),
-                    2,
-                ),
-            )
-        )
-
-    return primary
-
-
-def aggregate_shared_expense_context(vault_id, start_date, end_date):
-    conn = get_connection()
-    try:
-        shared_vaults = get_shared_vaults_for_personal_with_cursor(conn, vault_id)
-    finally:
-        conn.close()
-
-    you_paid = 0
-    partner_paid = 0
-    expenses = []
-
-    for shared_vault_id, _shared_name in shared_vaults:
-        page = get_shared_expenses_page_data(
-            shared_vault_id,
-            start_date.isoformat(),
-            end_date.isoformat(),
-        )
-        summary = page.get("summary") or {}
-        you_paid += number(summary.get("paid_by_current"))
-        partner_paid += number(summary.get("paid_by_other"))
-
-        for expense in page.get("expenses") or []:
-            expenses.append(
-                {
-                    "id": int(expense["id"]),
-                    "icon": str(expense.get("category_icon") or "label"),
-                    "name": str(expense.get("merchant") or expense.get("category") or "Shared expense"),
-                    "date": str(expense.get("date") or ""),
-                    "amount": number(expense.get("amount")),
-                }
-            )
-
-    expenses.sort(key=lambda item: item["amount"], reverse=True)
-    return you_paid, partner_paid, expenses[:5]
-
-
 def shared_report_payload(vault_id, selected_cycle, context):
     if is_shared_vault(vault_id):
         raise bad_request("Shared reports are available for personal vaults only.")
 
     start_date = context["start_date"]
     end_date = context["end_date"]
-    cycle_windows = context["cycle_windows"]
-    summary = to_json_safe(
-        get_report_summary(vault_id, start_date, end_date, cycle_windows)
-    )
-    actual_spend = number(summary["cash_outflow"])
-    projected_spend = number(summary["net_personal_cost"])
-    difference = round(actual_spend - projected_spend, 2)
-    percent_lower = round(difference / actual_spend * 100) if actual_spend else 0
-    comparison_label = (
-        f"{difference:,.0f} less than actual spend"
-        if difference > 0
-        else f"{abs(difference):,.0f} more than actual spend"
-        if difference < 0
-        else "Matches actual spend"
-    )
+    start_iso = start_date.isoformat()
+    end_iso = end_date.isoformat()
 
-    you_paid, partner_paid, top_expenses = aggregate_shared_expense_context(
-        vault_id,
-        start_date,
-        end_date,
-    )
-    total_paid = you_paid + partner_paid
-    you_percent = round(you_paid / total_paid * 100) if total_paid else 0
-    partner_percent = 100 - you_percent if total_paid else 0
+    conn = get_connection()
+    try:
+        shared_vaults = get_shared_vaults_for_personal_with_cursor(conn, vault_id)
+        shared_vault_ids = [sv[0] for sv in shared_vaults]
 
-    payable = number(summary["outstanding_payables"])
-    receivable = number(summary["outstanding_receivables"])
-    if receivable > payable:
-        current_label = "Partner owes you"
-        current_amount = round(receivable - payable, 2)
-    elif payable > receivable:
-        current_label = "You owe partner"
-        current_amount = round(payable - receivable, 2)
-    else:
-        current_label = "All balances settled"
-        current_amount = 0
+        total_shared_spend = 0.0
+        my_share = 0.0
+        transaction_count = 0
+        funding_participants = []
+        category_breakdown = []
+        top_expenses = []
 
-    cash_rows = category_rows(
-        to_json_safe(
-            get_cash_outflow_category_breakdown(
-                vault_id,
-                start_date,
-                end_date,
-            )
+        if shared_vault_ids:
+            placeholders = ",".join("?" * len(shared_vault_ids))
+
+            # 1. Participant Funding vs Share
+            for shared_vault_id, _shared_name in shared_vaults:
+                participants = get_shared_participants_with_cursor(conn.cursor(), shared_vault_id)
+                p_ids = [p[0] for p in participants]
+                cycle_paid_cents, cycle_share_cents = _accumulate_shared_expense_totals(
+                    conn.cursor(),
+                    shared_vault_id,
+                    p_ids,
+                    end_iso,
+                    start_iso,
+                )
+                tot_paid = sum(money_from_cents(cycle_paid_cents.get(pid, 0)) for pid in p_ids)
+                tot_share = sum(money_from_cents(cycle_share_cents.get(pid, 0)) for pid in p_ids)
+                for pid, pname in participants:
+                    paid = money_from_cents(cycle_paid_cents.get(pid, 0))
+                    share = money_from_cents(cycle_share_cents.get(pid, 0))
+                    funding_participants.append(
+                        ReportSharedParticipantFunding(
+                            vaultId=pid,
+                            name=pname,
+                            paidAmount=paid,
+                            shareAmount=share,
+                            netDifference=round(paid - share, 2),
+                            paidPercent=round(paid / tot_paid * 100) if tot_paid else 0,
+                            sharePercent=round(share / tot_share * 100) if tot_share else 0,
+                            isCurrentUser=(pid == vault_id),
+                        )
+                    )
+
+            funding_participants.sort(key=lambda p: (not p.is_current_user, -p.paid_amount))
+
+            # 2. Shared Category Breakdown
+            cat_sql = f"""
+            SELECT
+                COALESCE(c.id, 0) AS category_id,
+                COALESCE(c.name, 'Uncategorized') AS category_name,
+                COALESCE(c.emoji, '🏷️') AS category_icon,
+                COALESCE(SUM(t.amount), 0) AS total_amount,
+                COALESCE(SUM(
+                    CASE WHEN ts.participant_vault_id = ? THEN ts.share_amount ELSE 0 END
+                ), 0) AS my_share_amount,
+                COUNT(DISTINCT t.id) AS tx_count
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            LEFT JOIN transaction_shares ts ON ts.transaction_id = t.id AND ts.participant_vault_id = ?
+            WHERE t.beneficiary_vault_id IN ({placeholders})
+              AND t.is_deleted = 0
+              AND t.transaction_type = ?
+              AND t.date BETWEEN ? AND ?
+            GROUP BY c.id, c.name, c.emoji
+            ORDER BY total_amount DESC
+            """
+            cat_rows = conn.execute(
+                cat_sql,
+                [vault_id, vault_id] + shared_vault_ids + [EXPENSE, start_iso, end_iso],
+            ).fetchall()
+
+            total_shared_spend = round(sum(float(row[3] or 0) for row in cat_rows), 2)
+            my_share = round(sum(float(row[4] or 0) for row in cat_rows), 2)
+            transaction_count = sum(int(row[5] or 0) for row in cat_rows)
+
+            for row in cat_rows:
+                cat_total = round(float(row[3] or 0), 2)
+                cat_my_share = round(float(row[4] or 0), 2)
+                if cat_total > 0:
+                    category_breakdown.append(
+                        ReportSharedCategoryBreakdownItem(
+                            key=f"category:{row[0]}",
+                            icon=str(row[2] or "🏷️"),
+                            name=str(row[1] or "Uncategorized"),
+                            totalAmount=cat_total,
+                            myShareAmount=cat_my_share,
+                            percent=round(cat_total / total_shared_spend * 100) if total_shared_spend > 0 else 0,
+                        )
+                    )
+
+            # 3. Top 5 Largest Shared Expenses
+            top_sql = f"""
+            SELECT
+                t.id,
+                COALESCE(c.emoji, '🏷️') AS icon,
+                COALESCE(NULLIF(t.notes, ''), c.name, 'Shared expense') AS name,
+                t.date::text AS date,
+                t.amount
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            WHERE t.beneficiary_vault_id IN ({placeholders})
+              AND t.is_deleted = 0
+              AND t.transaction_type = ?
+              AND t.date BETWEEN ? AND ?
+            ORDER BY t.amount DESC
+            LIMIT 5
+            """
+            top_rows = conn.execute(
+                top_sql,
+                shared_vault_ids + [EXPENSE, start_iso, end_iso],
+            ).fetchall()
+
+            for row in top_rows:
+                top_expenses.append(
+                    ReportSharedExpenseItem(
+                        id=int(row[0]),
+                        icon=str(row[1] or "🏷️"),
+                        name=str(row[2] or "Shared expense"),
+                        date=str(row[3] or ""),
+                        amount=round(float(row[4] or 0), 2),
+                    )
+                )
+
+        # 4. Previous Cycle Comparison
+        previous_cycle = get_cycle_for_date(
+            vault_id,
+            add_months(selected_cycle.start_date, -1).isoformat(),
         )
-    )
-    net_rows = category_rows(
-        to_json_safe(
-            get_net_personal_category_breakdown(
-                vault_id,
-                start_date,
-                end_date,
-            )
-        )
-    )
+        previous_total_shared_spend = 0.0
+        previous_my_share = 0.0
+        comparison = None
 
-    return ReportSharedData(
-        hero=ReportSharedHero(
-            projectedPersonalSpend=projected_spend,
-            actualSpend=actual_spend,
-            difference=difference,
-            percentLower=percent_lower,
-            comparisonLabel=comparison_label,
-        ),
-        settlementOverview=[
-            ReportSharedSettlementCard(
-                key="you-paid",
-                label="You Paid",
-                amount=you_paid,
-                caption=f"{you_percent}% of shared expenses",
-                tone="purple",
-            ),
-            ReportSharedSettlementCard(
-                key="partner-paid",
-                label="Partner Paid",
-                amount=partner_paid,
-                caption=f"{partner_percent}% of shared expenses",
-                tone="blue",
-            ),
-            ReportSharedSettlementCard(
-                key="you-owe",
-                label="You Owe",
-                amount=payable,
-                caption="To partner",
-                tone="orange",
-            ),
-            ReportSharedSettlementCard(
-                key="you-are-owed",
-                label="You're Owed",
-                amount=receivable,
-                caption="From partner",
-                tone="green",
-            ),
-        ],
-        categoryImpact=merge_category_impact(cash_rows, net_rows),
-        settlementPreview=ReportSharedSettlementPreview(
-            currentLabel=current_label,
-            currentAmount=current_amount,
-            projectedPersonalSpend=projected_spend,
-        ),
-        contribution=ReportSharedContribution(
-            total=total_paid,
-            items=[
-                ReportSharedContributionItem(
-                    key="you",
-                    label="You",
-                    amount=you_paid,
-                    percent=you_percent,
-                    color=SHARED_CONTRIBUTION_COLORS["you"],
-                ),
-                ReportSharedContributionItem(
-                    key="partner",
-                    label="Partner",
-                    amount=partner_paid,
-                    percent=partner_percent,
-                    color=SHARED_CONTRIBUTION_COLORS["partner"],
-                ),
-            ],
-        ),
-        topExpenses=[
-            ReportSharedExpenseItem(
-                id=item["id"],
-                icon=item["icon"],
-                name=item["name"],
-                date=item["date"],
-                amount=item["amount"],
+        if shared_vault_ids:
+            prev_sql = f"""
+            SELECT
+                COALESCE(SUM(t.amount), 0) AS total_amount,
+                COALESCE(SUM(
+                    CASE WHEN ts.participant_vault_id = ? THEN ts.share_amount ELSE 0 END
+                ), 0) AS my_share_amount
+            FROM transactions t
+            LEFT JOIN transaction_shares ts ON ts.transaction_id = t.id AND ts.participant_vault_id = ?
+            WHERE t.beneficiary_vault_id IN ({placeholders})
+              AND t.is_deleted = 0
+              AND t.transaction_type = ?
+              AND t.date BETWEEN ? AND ?
+            """
+            prev_row = conn.execute(
+                prev_sql,
+                [vault_id, vault_id] + shared_vault_ids + [EXPENSE, previous_cycle.start_iso, previous_cycle.end_iso],
+            ).fetchone()
+            if prev_row:
+                previous_total_shared_spend = round(float(prev_row[0] or 0), 2)
+                previous_my_share = round(float(prev_row[1] or 0), 2)
+
+            diff = my_share - previous_my_share
+            if previous_my_share > 0:
+                pct = round(abs(diff) / previous_my_share * 100)
+                comparison = ReportSpendingComparison(
+                    label=f"{abs(diff):,.0f} vs previous cycle",
+                    direction="up" if diff > 0 else "down" if diff < 0 else "flat",
+                    percent=pct,
+                )
+            elif my_share > 0:
+                comparison = ReportSpendingComparison(
+                    label="New shared spend",
+                    direction="up",
+                    percent=100,
+                )
+            else:
+                comparison = ReportSpendingComparison(
+                    label="Matches previous cycle",
+                    direction="flat",
+                    percent=0,
+                )
+
+        my_share_percent = round(my_share / total_shared_spend * 100) if total_shared_spend > 0 else 0
+        summary = ReportSharedSummary(
+            totalSharedSpend=total_shared_spend,
+            myShare=my_share,
+            mySharePercent=my_share_percent,
+            previousTotalSharedSpend=previous_total_shared_spend,
+            previousMyShare=previous_my_share,
+            comparison=comparison,
+            transactionCount=transaction_count,
+        )
+
+        # 5. 6-Cycle Shared Spending Trend
+        trend = []
+        anchor_cycle = get_cycle_for_date(vault_id, end_iso)
+        for offset in range(5, -1, -1):
+            c_start = add_months(anchor_cycle.start_date, -offset)
+            c = get_cycle_for_date(vault_id, c_start.isoformat())
+            c_total = 0.0
+            c_my_share = 0.0
+            if shared_vault_ids:
+                t_row = conn.execute(
+                    prev_sql,
+                    [vault_id, vault_id] + shared_vault_ids + [EXPENSE, c.start_iso, c.end_iso],
+                ).fetchone()
+                if t_row:
+                    c_total = round(float(t_row[0] or 0), 2)
+                    c_my_share = round(float(t_row[1] or 0), 2)
+
+            trend.append(
+                ReportSharedTrendPoint(
+                    cycle=format_cycle_range(c.start_date, c.end_date),
+                    totalSharedSpend=c_total,
+                    myShare=c_my_share,
+                )
             )
-            for item in top_expenses
-        ],
-    )
+
+        return ReportSharedData(
+            summary=summary,
+            fundingVsShare=funding_participants,
+            categoryBreakdown=category_breakdown,
+            trend=trend,
+            topExpenses=top_expenses,
+        )
+
+    finally:
+        conn.close()
 
 
 @router.get("/shared", response_model=ReportSharedResponse, response_model_by_alias=True)
@@ -960,6 +947,7 @@ def reports_spending(
 
     vault_id = int_vault_id(vault)
     selected_cycle = select_cycle(vault_id, cycle_start)
+    context = report_period_context(vault_id, selected_cycle)
     previous_cycle = get_cycle_for_date(vault_id, add_months(selected_cycle.start_date, -1).isoformat())
     shared = is_shared_vault(vault_id)
     filters = {
@@ -975,6 +963,26 @@ def reports_spending(
     previous = spending_rows(vault_id, previous_cycle.start_date, previous_cycle.end_date, shared, filters)
     previous_label = previous_cycle.start_date.strftime("%b %Y")
 
+    summary_dict = to_json_safe(
+        get_report_summary(vault_id, selected_cycle.start_date, selected_cycle.end_date, context["cycle_windows"])
+    )
+    actual_spend = number(summary_dict.get("cash_outflow"))
+    projected_spend = number(summary_dict.get("net_personal_cost"))
+    diff = round(actual_spend - projected_spend, 2)
+    diff_label = (
+        f"{diff:,.0f} less than actual spend after settlement"
+        if diff > 0
+        else f"{abs(diff):,.0f} more than actual spend after settlement"
+        if diff < 0
+        else "Matches actual spend"
+    )
+    spend_comparison = ReportSpendComparison(
+        actualSpend=actual_spend,
+        projectedPersonalSpend=projected_spend,
+        difference=diff,
+        differenceLabel=diff_label,
+    )
+
     return ReportSpendingResponse(
         generatedAt=datetime.now(timezone.utc),
         vault=vault,
@@ -984,5 +992,15 @@ def reports_spending(
             startDate=selected_cycle.start_iso,
             endDate=selected_cycle.end_iso,
         ),
-        data=spending_analytics_data(dimension, current, previous, selected_cycle, previous_label, vault_id, shared, filters),
+        data=spending_analytics_data(
+            dimension,
+            current,
+            previous,
+            selected_cycle,
+            previous_label,
+            vault_id,
+            shared,
+            filters,
+            spend_comparison=spend_comparison,
+        ),
     )

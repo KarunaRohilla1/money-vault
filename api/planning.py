@@ -259,7 +259,7 @@ def status_label(status, kind):
     return "Pending"
 
 
-def build_activity(kind, row, status, month, year):
+def build_activity(kind, row, status, cycle):
     status_response = adapt_status(status)
     complete_status = "RECEIVED" if kind == "income" else "PAID"
     activity_status = status_response.status
@@ -274,7 +274,13 @@ def build_activity(kind, row, status, month, year):
         if activity_status == complete_status and status_response.actual_amount is not None
         else effective_expected
     )
-    due_iso = get_planning_transaction_date(year, month, row[3])
+    due_day = int(row[3])
+    if due_day < cycle.start_date.day:
+        due_year, due_month = cycle.end_date.year, cycle.end_date.month
+    else:
+        due_year, due_month = cycle.start_date.year, cycle.start_date.month
+
+    due_iso = get_planning_transaction_date(due_year, due_month, due_day)
 
     return PlanningActivityResponse(
         accountId=int(row[5]) if row[5] is not None else None,
@@ -320,7 +326,7 @@ def build_cycle_progress(cycle):
         daysRemaining=days_remaining,
         progressPercent=progress_percent,
         startLabel=cycle_start.strftime("%d %b %Y"),
-        status=derive_cycle_status(cycle_start, cycle_end, today),
+        status=derive_cycle_status(cycle_start, cycle_end, today, closed_at=getattr(cycle, "closed_at", None)),
         totalDays=total_days
     )
 
@@ -342,14 +348,16 @@ def build_completion(totals, activities):
 
 
 def build_close_readiness(cycle, activities):
-    pending = [activity for activity in activities if activity.status.status in {"PENDING", "CARRIED_FORWARD"}]
+    is_closed = bool(getattr(cycle, "closed_at", None)) or cycle.status == "Completed"
+    can_close = cycle.status == "Current" and not is_closed
+    pending = [activity for activity in activities if activity.status.status == "PENDING"] if not is_closed else []
     total = len(activities)
 
     return PlanningCloseReadinessResponse(
-        canClose=cycle.status == "Current",
+        canClose=can_close,
         completedCount=max(total - len(pending), 0),
         pendingCount=len(pending),
-        reviewRequired=len(pending) > 0,
+        reviewRequired=len(pending) > 0 and can_close,
         totalCount=total
     )
 def build_planning(vault_id, cycle_start=None):
@@ -376,10 +384,10 @@ def build_planning(vault_id, cycle_start=None):
     commitment_rows = get_commitments(vault_id)
     income_rows = get_income_templates(vault_id)
     activities = [
-        build_activity("income", row, statuses.get(("income", row[0])), month, year)
+        build_activity("income", row, statuses.get(("income", row[0])), cycle)
         for row in income_rows
     ] + [
-        build_activity("commitment", row, statuses.get(("commitment", row[0])), month, year)
+        build_activity("commitment", row, statuses.get(("commitment", row[0])), cycle)
         for row in commitment_rows
     ]
     activities.sort(key=lambda activity: (activity.due_day, activity.kind, activity.id))
@@ -442,17 +450,6 @@ def planning_cycles(
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
     return build_cycle_navigation(int_vault_id(vault), year, status)
-
-
-@router.get("/cycles/adjacent", response_model=PlanningCycleResponse, response_model_by_alias=True)
-def adjacent_planning_cycle(
-    cycle_start: str = Query(alias="cycleStart"),
-    direction: str = Query(default="next"),
-    vault: VaultContext = Depends(get_authenticated_vault)
-):
-    vault_id = int_vault_id(vault)
-    cycle = select_cycle(vault_id, cycle_start)
-    return adapt_cycle(adjacent_cycle(vault_id, cycle, direction))
 
 
 @router.post("/commitments", response_model=SuccessResponse, response_model_by_alias=True)
@@ -643,7 +640,7 @@ def validate_close_request(vault_id, request):
 
 def close_selected_cycle(vault_id, cycle_start, request):
     cycle = select_cycle(vault_id, cycle_start)
-    if cycle.status != CURRENT:
+    if cycle.status != CURRENT or getattr(cycle, "closed_at", None):
         raise bad_request("Only the current financial cycle can be closed.")
 
     close_items = validate_close_request(vault_id, request)
@@ -665,12 +662,3 @@ def close_cycle_by_start(
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
     return close_selected_cycle(int_vault_id(vault), cycle_start, request)
-
-
-@router.post("/cycles/close-active", response_model=PlanningCycleResponse, response_model_by_alias=True)
-def close_cycle(
-    request: PlanningCloseRequest | None = Body(default=None),
-    vault: VaultContext = Depends(get_authenticated_vault)
-):
-    vault_id = int_vault_id(vault)
-    return close_selected_cycle(vault_id, get_current_cycle(vault_id).start_iso, request)

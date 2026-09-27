@@ -3,6 +3,7 @@ from datetime import date, timedelta
 
 from db.cache import cache_data, clear_data_cache
 from db.core import EXPENSE, get_connection
+from db.identity import person_display_name_sql
 from db.financial_cycles import (
     get_current_cycle,
     get_cycle_context_with_cursor,
@@ -132,16 +133,16 @@ def row_to_bill(row):
 
 def get_participants_with_cursor(cursor, shared_vault_id):
     return cursor.execute(
-        """
+        f"""
         SELECT
             v.id,
-            v.name
+            {person_display_name_sql("v.id", "v.name")} AS name
         FROM vault_shares vs
         JOIN vaults v
             ON vs.shared_vault_id = v.id
         WHERE vs.vault_id = ?
         AND v.vault_type = 'Individual'
-        ORDER BY v.name
+        ORDER BY name
         """,
         (shared_vault_id,)
     ).fetchall()
@@ -505,7 +506,7 @@ def get_shared_bills_page_data(shared_vault_id, year=None, month=None):
         if cycle:
             cycle_id = cycle[0]
             instances = cursor.execute(
-                """
+                f"""
                 SELECT
                     i.id,
                     i.bill_id,
@@ -516,7 +517,7 @@ def get_shared_bills_page_data(shared_vault_id, year=None, month=None):
                     i.category_id,
                     i.status,
                     i.payer_vault_id,
-                    COALESCE(payer.name, ''),
+                    {person_display_name_sql("i.payer_vault_id", "payer.name")},
                     i.payment_date,
                     COALESCE(i.payment_notes, ''),
                     i.transaction_id,
@@ -533,11 +534,11 @@ def get_shared_bills_page_data(shared_vault_id, year=None, month=None):
                 (cycle_id,)
             ).fetchall()
             share_rows = cursor.execute(
-                """
+                f"""
                 SELECT
                     s.bill_instance_id,
                     s.participant_vault_id,
-                    v.name,
+                    {person_display_name_sql("s.participant_vault_id", "v.name")},
                     s.expected_amount,
                     s.expected_percentage
                 FROM shared_bill_instance_shares s
@@ -822,282 +823,6 @@ def get_shared_bills(shared_vault_id):
         conn.close()
 
 
-def add_shared_bill(
-    shared_vault_id,
-    name,
-    amount,
-    due_day,
-    category_id=None,
-    notes="",
-    frequency="Monthly",
-    start_date=None,
-    end_date=None,
-    is_active=True
-):
-    name = name.strip()
-    amount = normalize_amount(amount)
-    due_day = normalize_due_day(due_day)
-    frequency = frequency if frequency in FREQUENCIES else "Monthly"
-    start_date = start_date or date.today().replace(day=1).isoformat()
-
-    if not name:
-        raise ValueError("Shared bill name cannot be empty.")
-
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO shared_bills
-            (
-                shared_vault_id,
-                name,
-                amount,
-                due_day,
-                category_id,
-                notes,
-                frequency,
-                start_date,
-                end_date,
-                is_active
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                shared_vault_id,
-                name,
-                amount,
-                due_day,
-                category_id,
-                notes.strip(),
-                frequency,
-                start_date,
-                end_date,
-                1 if is_active else 0
-            )
-        )
-        bill_id = cursor.lastrowid
-        ensure_current_shared_bill_cycle_with_cursor(
-            cursor,
-            shared_vault_id
-        )
-        conn.commit()
-        clear_data_cache((
-            "shared_bills",
-            "dashboard",
-            "reports",
-            "transactions",
-            "accounts",
-            "shared_expenses",
-            "transaction_shares"
-        ))
-        return bill_id
-
-    finally:
-        conn.close()
-
-
-def update_shared_bill(
-    bill_id,
-    name,
-    amount,
-    due_day,
-    category_id=None,
-    notes="",
-    frequency="Monthly",
-    start_date=None,
-    end_date=None,
-    is_active=True
-):
-    name = name.strip()
-    amount = normalize_amount(amount)
-    due_day = normalize_due_day(due_day)
-    frequency = frequency if frequency in FREQUENCIES else "Monthly"
-
-    if not name:
-        raise ValueError("Shared bill name cannot be empty.")
-
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-        bill = cursor.execute(
-            """
-            SELECT shared_vault_id
-            FROM shared_bills
-            WHERE id = ?
-            """,
-            (bill_id,)
-        ).fetchone()
-        if not bill:
-            raise ValueError("Bill not found.")
-        cursor.execute(
-            """
-            UPDATE shared_bills
-            SET
-                name = ?,
-                amount = ?,
-                due_day = ?,
-                category_id = ?,
-                notes = ?,
-                frequency = ?,
-                start_date = ?,
-                end_date = ?,
-                is_active = ?
-            WHERE id = ?
-            """,
-            (
-                name,
-                amount,
-                due_day,
-                category_id,
-                notes.strip(),
-                frequency,
-                start_date,
-                end_date,
-                1 if is_active else 0,
-                bill_id
-            )
-        )
-        ensure_current_shared_bill_cycle_with_cursor(
-            cursor,
-            bill[0]
-        )
-        conn.commit()
-        clear_data_cache((
-            "shared_bills",
-            "dashboard",
-            "reports",
-            "transactions",
-            "accounts",
-            "shared_expenses",
-            "transaction_shares"
-        ))
-        return True
-
-    finally:
-        conn.close()
-
-
-def delete_shared_bill(bill_id):
-    return cancel_shared_bill(bill_id)
-
-
-def cancel_shared_bill(bill_id):
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            UPDATE shared_bills
-            SET is_active = 0
-            WHERE id = ?
-            """,
-            (bill_id,)
-        )
-        cursor.execute(
-            """
-            UPDATE shared_bill_instances
-            SET status = ?
-            WHERE bill_id = ?
-            AND status = ?
-            """,
-            (
-                BILL_CANCELLED,
-                bill_id,
-                BILL_PENDING
-            )
-        )
-        conn.commit()
-        clear_data_cache((
-            "shared_bills",
-            "dashboard",
-            "reports",
-            "transactions",
-            "accounts",
-            "shared_expenses",
-            "transaction_shares"
-        ))
-        return True
-
-    finally:
-        conn.close()
-
-
-def duplicate_shared_bill(bill_id):
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-        bill = cursor.execute(
-            """
-            SELECT
-                shared_vault_id,
-                name,
-                amount,
-                due_day,
-                category_id,
-                notes,
-                frequency,
-                start_date,
-                end_date,
-                is_active
-            FROM shared_bills
-            WHERE id = ?
-            """,
-            (bill_id,)
-        ).fetchone()
-        if not bill:
-            raise ValueError("Bill not found.")
-        cursor.execute(
-            """
-            INSERT INTO shared_bills
-            (
-                shared_vault_id,
-                name,
-                amount,
-                due_day,
-                category_id,
-                notes,
-                frequency,
-                start_date,
-                end_date,
-                is_active
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                bill[0],
-                f"{bill[1]} Copy",
-                bill[2],
-                bill[3],
-                bill[4],
-                bill[5],
-                bill[6],
-                bill[7],
-                bill[8],
-                bill[9]
-            )
-        )
-        new_bill_id = cursor.lastrowid
-        ensure_current_shared_bill_cycle_with_cursor(
-            cursor,
-            bill[0]
-        )
-        conn.commit()
-        clear_data_cache((
-            "shared_bills",
-            "dashboard",
-            "reports",
-            "transactions",
-            "accounts",
-            "shared_expenses",
-            "transaction_shares"
-        ))
-        return new_bill_id
-
-    finally:
-        conn.close()
-
-
 def skip_bill_instance(instance_id):
     conn = get_connection()
     try:
@@ -1267,85 +992,3 @@ def mark_bill_paid(instance_id, payer_vault_id, payment_date, notes=""):
     finally:
         conn.close()
 
-
-def close_cycle(cycle_id):
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-        cycle = cursor.execute(
-            """
-            SELECT
-                shared_vault_id,
-                month,
-                year,
-                status
-            FROM shared_bill_cycles
-            WHERE id = ?
-            """,
-            (cycle_id,)
-        ).fetchone()
-        if not cycle:
-            raise ValueError("Cycle not found.")
-        if cycle[3] == CYCLE_CLOSED:
-            raise ValueError("Cycle is already closed.")
-
-        totals = cursor.execute(
-            """
-            SELECT
-                COALESCE(SUM(CASE WHEN status != ? THEN amount ELSE 0 END), 0),
-                COALESCE(SUM(CASE WHEN status = ? THEN amount ELSE 0 END), 0)
-            FROM shared_bill_instances
-            WHERE cycle_id = ?
-            """,
-            (
-                BILL_CANCELLED,
-                BILL_PAID,
-                cycle_id
-            )
-        ).fetchone()
-        total = float(totals[0] or 0)
-        paid = float(totals[1] or 0)
-        remaining = max(total - paid, 0)
-        cursor.execute(
-            """
-            UPDATE shared_bill_cycles
-            SET
-                status = ?,
-                total_amount = ?,
-                paid_amount = ?,
-                remaining_amount = ?,
-                closed_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (
-                CYCLE_CLOSED,
-                total,
-                paid,
-                remaining,
-                cycle_id
-            )
-        )
-        next_year, next_cycle_month = next_month(
-            cycle[2],
-            cycle[1]
-        )
-        get_or_create_cycle_with_cursor(
-            cursor,
-            cycle[0],
-            next_year,
-            next_cycle_month
-        )
-        conn.commit()
-        clear_data_cache((
-            "shared_bills",
-            "dashboard",
-            "reports",
-            "transactions",
-            "accounts",
-            "shared_expenses",
-            "transaction_shares",
-            "cycles"
-        ))
-
-    finally:
-        conn.close()

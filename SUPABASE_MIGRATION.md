@@ -1,42 +1,46 @@
-# Money Vault Supabase Migration
+# Supabase PostgreSQL Setup & Configuration
 
-Money Vault now stores application data in Supabase PostgreSQL.
+Money Vault uses Supabase PostgreSQL for persistent multi-vault application data.
 
-## Required Streamlit Secrets
+---
 
-Add these in Streamlit Community Cloud under app settings > Secrets:
+## 1. Database Provisioning
 
-```toml
-SUPABASE_DB_URL = "<pooled-postgres-connection-url-from-supabase>"
-SUPABASE_URL = "https://PROJECT_REF.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY = "your-service-role-key"
+1. Create a project in [Supabase](https://supabase.com).
+2. Open **Project Settings > Database** in the Supabase Dashboard.
+3. Locate the **Connection string** section and copy the **URI (Transaction pooler / Session pooler)**.
+4. Replace `[YOUR-PASSWORD]` in the connection string with your actual database password.
+
+---
+
+## 2. Schema Setup
+
+Initialize the required tables, constraints, and indexes:
+1. Navigate to the **SQL Editor** in the Supabase dashboard.
+2. Open [`supabase/schema.sql`](supabase/schema.sql) from this repository.
+3. Paste the contents into the SQL Editor and run the script.
+
+The schema establishes:
+- Vaults, members, and user profiles (`vaults`, `vault_members`, `profiles`, `user_recovery_codes`)
+- Financial entities (`accounts`, `categories`, `transactions`, `transfers`)
+- Planning & commitments (`income_templates`, `commitments`, `financial_cycles`, `cycle_history`)
+- Shared vault expenses, bills, and settlements (`shared_expenses`, `shared_bills`, `shared_settlements`, `transaction_shares`)
+- Smart SMS capture inbox (`capture_drafts`)
+- Wishlist items and categories (`wishlist_items`, `wishlist_categories`)
+
+---
+
+## 3. Environment Variables Configuration
+
+Set the database connection parameters in your backend environment (or `.env` file):
+
+```bash
+# Database connection string (pooled recommended for serverless/containers)
+SUPABASE_DB_URL="postgresql://postgres.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres"
+
+# Supabase API credentials
+SUPABASE_URL="https://[PROJECT_REF].supabase.co"
+SUPABASE_JWT_SECRET="your-supabase-jwt-secret"
 ```
 
-`SUPABASE_DB_URL` can also be named `DATABASE_URL`. Use Supabase's pooled PostgreSQL connection string for Streamlit Cloud.
-
-## Manual Supabase Steps
-
-1. Create a Supabase project.
-2. Open Project Settings > Database and copy the pooled PostgreSQL connection string.
-3. Replace `[YOUR-PASSWORD]` in the copied connection string with your database password.
-4. Add the Streamlit secrets above.
-5. Run the schema in Supabase SQL Editor using `supabase/schema.sql`, or let the app create the schema on startup.
-6. Run the one-time migration script from your local machine:
-
-```powershell
-python scripts/migrate_sqlite_to_supabase.py --sqlite-path data/money.db
-```
-
-The script preserves IDs and relationships, then resets PostgreSQL identity sequences so future inserts continue correctly.
-
-## Local Environment Variables
-
-For local development, set:
-
-```powershell
-$env:SUPABASE_DB_URL="<pooled-postgres-connection-url-from-supabase>"
-$env:SUPABASE_URL="https://PROJECT_REF.supabase.co"
-$env:SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-```
-
-Never commit real Supabase credentials.
+> **Security Note:** Never commit production credentials or connection strings containing real passwords to version control.

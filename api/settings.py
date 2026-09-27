@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from api.dependencies import get_authenticated_vault
 from api.resources import bad_request, int_vault_id
 from api.schemas import SettingsResponse, SettingsUpdateRequest, VaultContext, VaultSummaryResponse
+from db.identity import MEMBER_ROLE, OWNER_ROLE, get_membership
 from db.vaults import (
     get_all_vaults,
     get_connected_shared_vaults,
@@ -16,12 +17,22 @@ from db.vaults import (
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
-def adapt_vault(row):
+def adapt_vault(row, user_id=None):
+    vault_id = int(row[0])
+    vault_type = row[4] if len(row) > 4 else "Individual"
+    role = None
+    if user_id:
+        role = get_membership(user_id, vault_id)
+    if not role:
+        role = OWNER_ROLE if vault_type == "Individual" else (OWNER_ROLE if bool(row[2]) else MEMBER_ROLE)
+    is_admin = (role == OWNER_ROLE)
+
     return VaultSummaryResponse(
-        id=int(row[0]),
+        id=vault_id,
         name=row[1],
-        isAdmin=bool(row[2]) if len(row) > 2 else False,
-        vaultType=row[4] if len(row) > 4 else "Individual"
+        isAdmin=is_admin,
+        vaultType=vault_type,
+        role=role
     )
 
 
@@ -35,8 +46,9 @@ def accessible_vaults_for(current_vault):
             VaultSummaryResponse(
                 id=int(row[0]),
                 name=row[1],
-                isAdmin=False,
-                vaultType="Individual"
+                isAdmin=True,
+                vaultType="Individual",
+                role=OWNER_ROLE
             )
             for row in rows
         ]
@@ -47,7 +59,8 @@ def accessible_vaults_for(current_vault):
             id=int(row[0]),
             name=row[1],
             isAdmin=False,
-            vaultType="Shared"
+            vaultType="Shared",
+            role=MEMBER_ROLE
         )
         for row in shared_rows
     ]
@@ -66,7 +79,7 @@ def settings(vault: VaultContext = Depends(get_authenticated_vault)):
             accessible_source = authenticated
     financial = get_vault_financial_settings(vault_id)
     return SettingsResponse(
-        currentVault=adapt_vault(current),
+        currentVault=adapt_vault(current, user_id=vault.user_id),
         accessibleVaults=accessible_vaults_for(accessible_source),
         cycleStartDay=int(financial[0] or 1),
         monthlySavingsGoal=float(financial[1] or 0)
@@ -81,6 +94,10 @@ def update_settings(request: SettingsUpdateRequest, vault: VaultContext = Depend
     next_name = current_name if request.vault_name is None else request.vault_name.strip()
 
     try:
+        vault_type = current[4] if len(current) > 4 else "Individual"
+        if vault_type == "Individual":
+            next_name = "Personal"
+
         update_vault(
             vault_id,
             next_name,

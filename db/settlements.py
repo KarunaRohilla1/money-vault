@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from db.core import TRANSFER_IN, TRANSFER_OUT, get_connection
 from db.financial_cycles import get_current_cycle
+from db.identity import person_display_name_sql
 from db.shared_expenses import (
     as_money,
     build_settlements_from_balances,
@@ -369,8 +370,8 @@ def get_settlement_history(
                 s.outstanding_after,
                 s.settled_at,
                 s.created_at,
-                from_vault.name,
-                to_vault.name
+                {person_display_name_sql("from_vault.id", "from_vault.name")},
+                {person_display_name_sql("to_vault.id", "to_vault.name")}
             FROM settlements s
             LEFT JOIN vaults from_vault
                 ON from_vault.id = s.from_participant_id

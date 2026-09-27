@@ -18,7 +18,7 @@ from api.schemas import (
     SettlementResponse,
     VaultContext,
 )
-from db.dashboard import get_dashboard_page_data
+from db.dashboard import get_dashboard_page_data, get_onboarding_status
 from db.financial_cycles import get_current_cycle
 
 
@@ -231,7 +231,13 @@ def dashboard(vault: VaultContext = Depends(get_authenticated_vault)):
     try:
         vault_id = int(vault.id)
         payload = get_dashboard_page_data(vault_id)
-        cycle = get_current_cycle(vault_id)
+        cycle = payload.get("cycle") or get_current_cycle(vault_id)
+        setup_vault_id = int(vault.authenticated_vault_id or vault.id)
+        if setup_vault_id != vault_id:
+            payload = {
+                **payload,
+                "status": get_onboarding_status(setup_vault_id)
+            }
     except Exception as error:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

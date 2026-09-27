@@ -7,8 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field
 class LoginRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    vault_name: str = Field(alias="vaultName", min_length=1)
+    username: str = Field(min_length=1)
     pin: str = Field(min_length=1)
+
+
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    username: str = Field(min_length=1)
+    display_name: str = Field(alias="displayName", min_length=1)
+    pin: str = Field(min_length=4, max_length=6)
+    confirm_pin: str = Field(alias="confirmPin", min_length=4, max_length=6)
 
 
 class VaultContext(BaseModel):
@@ -21,6 +30,9 @@ class VaultContext(BaseModel):
     authenticated_vault_id: Optional[str] = Field(default=None, alias="authenticatedVaultId")
     authenticated_vault_name: Optional[str] = Field(default=None, alias="authenticatedVaultName")
     authenticated_vault_type: Optional[str] = Field(default=None, alias="authenticatedVaultType")
+    user_id: Optional[str] = Field(default=None, alias="userId")
+    pin_set: Optional[bool] = Field(default=None, alias="pinSet")
+    role: Optional[str] = None
 
 
 class LoginResponse(BaseModel):
@@ -30,6 +42,26 @@ class LoginResponse(BaseModel):
     vault: VaultContext
     authenticated_vault: Optional[VaultContext] = Field(default=None, alias="authenticatedVault")
     expires_at: Optional[str] = Field(default=None, alias="expiresAt")
+    pin_set: Optional[bool] = Field(default=None, alias="pinSet")
+    display_name: Optional[str] = Field(default=None, alias="displayName")
+    user_id: Optional[str] = Field(default=None, alias="userId")
+    invite_code: Optional[str] = Field(default=None, alias="inviteCode")
+    recovery_code: Optional[str] = Field(default=None, alias="recoveryCode")
+
+
+class RecoverPinRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    username: str = Field(min_length=1)
+    recovery_code: str = Field(alias="recoveryCode", min_length=1)
+    new_pin: str = Field(alias="newPin", min_length=4, max_length=6)
+    confirm_pin: str = Field(alias="confirmPin", min_length=4, max_length=6)
+
+
+class RecoveryCodeResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    recovery_code: str = Field(alias="recoveryCode")
 
 
 class SharedVaultActivationRequest(BaseModel):
@@ -37,6 +69,18 @@ class SharedVaultActivationRequest(BaseModel):
 
     shared_vault_id: int = Field(alias="sharedVaultId")
     pin: Optional[str] = Field(default=None, min_length=1)
+
+
+class CreateSharedVaultRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    vault_name: str = Field(alias="vaultName", min_length=1)
+
+
+class JoinSharedVaultRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    invite_code: str = Field(alias="inviteCode", min_length=1)
 
 
 class FinancialCycleResponse(BaseModel):
@@ -236,6 +280,14 @@ class TransactionMonthRangeResponse(BaseModel):
     latest_month: str = Field(alias="latestMonth")
 
 
+class TransactionShareResponse(BaseModel):
+    id: int
+    participant_vault_id: int = Field(alias="participantVaultId")
+    participant_name: str = Field(alias="participantName")
+    share_amount: float = Field(alias="shareAmount")
+    share_percentage: Optional[float] = Field(default=None, alias="sharePercentage")
+
+
 class TransactionDetailResponse(BaseModel):
     id: int
     account_id: int = Field(alias="accountId")
@@ -252,6 +304,7 @@ class TransactionDetailResponse(BaseModel):
     shared: bool = False
     shared_vault_name: Optional[str] = Field(default=None, alias="sharedVaultName")
     transfer_group_id: Optional[str] = Field(default=None, alias="transferGroupId")
+    shares: List[TransactionShareResponse] = Field(default_factory=list)
     created_at: Optional[str] = Field(default=None, alias="createdAt")
     updated_at: Optional[str] = Field(default=None, alias="updatedAt")
 
@@ -720,11 +773,19 @@ class ReportSpendingMetadata(BaseModel):
     filter_options: ReportSpendingFilterOptions = Field(alias="filterOptions")
 
 
+class ReportSpendComparison(BaseModel):
+    actual_spend: float = Field(alias="actualSpend")
+    projected_personal_spend: float = Field(alias="projectedPersonalSpend")
+    difference: float
+    difference_label: str = Field(alias="differenceLabel")
+
+
 class ReportSpendingData(BaseModel):
     summary: List[ReportSpendingSummaryMetric]
     visualization: ReportSpendingVisualization
     trend: ReportSpendingTrend
     breakdown: ReportSpendingBreakdown
+    spend_comparison: Optional[ReportSpendComparison] = Field(default=None, alias="spendComparison")
     metadata: ReportSpendingMetadata
 
 
@@ -735,10 +796,52 @@ class ReportSpendingResponse(BaseModel):
     data: ReportSpendingData
 
 class VaultSummaryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: int
     is_admin: bool = Field(alias="isAdmin")
     name: str
     vault_type: str = Field(alias="vaultType")
+    role: Optional[str] = None
+
+
+class SharedVaultSummaryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    is_admin: bool = Field(alias="isAdmin")
+    name: str
+    vault_type: str = Field(alias="vaultType")
+    role: str
+    member_count: int = Field(alias="memberCount")
+
+
+class SharedVaultMemberResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: str = Field(alias="userId")
+    display_name: str = Field(alias="displayName")
+    role: str
+    is_current_user: bool = Field(alias="isCurrentUser")
+
+
+class SharedVaultDetailResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    is_admin: bool = Field(alias="isAdmin")
+    name: str
+    vault_type: str = Field(alias="vaultType")
+    role: str
+    member_count: int = Field(alias="memberCount")
+    invite_code: Optional[str] = Field(default=None, alias="inviteCode")
+    members: List[SharedVaultMemberResponse]
+
+
+class SharedVaultRenameRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    vault_name: str = Field(alias="vaultName", min_length=1)
 
 
 class SettingsResponse(BaseModel):
@@ -754,6 +857,40 @@ class SessionResponse(BaseModel):
     vault: VaultContext
     authenticated_vault: VaultContext = Field(alias="authenticatedVault")
     accessible_vaults: List[VaultSummaryResponse] = Field(alias="accessibleVaults")
+    user_id: Optional[str] = Field(default=None, alias="userId")
+    display_name: Optional[str] = Field(default=None, alias="displayName")
+    pin_set: Optional[bool] = Field(default=None, alias="pinSet")
+
+
+class ProfileUpdateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    display_name: str = Field(alias="displayName", min_length=1)
+
+
+class PinSetRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    pin: str = Field(min_length=4, max_length=6)
+    confirm_pin: str = Field(alias="confirmPin", min_length=4, max_length=6)
+
+
+class PinChangeRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    current_pin: str = Field(alias="currentPin", min_length=1)
+    new_pin: str = Field(alias="newPin", min_length=4, max_length=6)
+    confirm_pin: str = Field(alias="confirmPin", min_length=4, max_length=6)
+
+
+class PinVerifyRequest(BaseModel):
+    pin: str = Field(min_length=1)
+
+
+class VaultActivationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    vault_id: int = Field(alias="vaultId")
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -762,19 +899,7 @@ class SettingsUpdateRequest(BaseModel):
     vault_name: Optional[str] = Field(default=None, alias="vaultName")
     cycle_start_day: Optional[int] = Field(default=None, alias="cycleStartDay", ge=1, le=31)
     monthly_savings_goal: Optional[float] = Field(default=None, alias="monthlySavingsGoal", ge=0)
-
-
-class SharedBillRequest(BaseModel):
-    amount: float = Field(gt=0)
-    category_id: Optional[int] = Field(default=None, alias="categoryId")
-    due_day: int = Field(alias="dueDay", ge=1, le=31)
-    end_date: Optional[str] = Field(default=None, alias="endDate")
-    frequency: str = "Monthly"
-    is_active: bool = Field(default=True, alias="isActive")
-    name: str = Field(min_length=1)
-    notes: str = ""
-    shared_vault_id: int = Field(alias="sharedVaultId")
-    start_date: Optional[str] = Field(default=None, alias="startDate")
+    pin: Optional[str] = Field(default=None, min_length=1)
 
 
 class SharedBillPaymentRequest(BaseModel):
@@ -795,48 +920,40 @@ class SharedSettlementRequest(BaseModel):
     to_vault_id: int = Field(alias="toVaultId")
 
 
-class ReportSharedHero(BaseModel):
-    projected_personal_spend: float = Field(alias="projectedPersonalSpend")
-    actual_spend: float = Field(alias="actualSpend")
-    difference: float
-    percent_lower: int = Field(alias="percentLower")
-    comparison_label: str = Field(alias="comparisonLabel")
+class ReportSharedSummary(BaseModel):
+    total_shared_spend: float = Field(alias="totalSharedSpend")
+    my_share: float = Field(alias="myShare")
+    my_share_percent: int = Field(alias="mySharePercent")
+    previous_total_shared_spend: float = Field(alias="previousTotalSharedSpend")
+    previous_my_share: float = Field(alias="previousMyShare")
+    comparison: Optional[ReportSpendingComparison] = None
+    transaction_count: int = Field(alias="transactionCount")
 
 
-class ReportSharedContributionItem(BaseModel):
-    key: str
-    label: str
-    amount: float
-    percent: int
-    color: str
+class ReportSharedParticipantFunding(BaseModel):
+    vault_id: int = Field(alias="vaultId")
+    name: str
+    paid_amount: float = Field(alias="paidAmount")
+    share_amount: float = Field(alias="shareAmount")
+    net_difference: float = Field(alias="netDifference")
+    paid_percent: int = Field(alias="paidPercent")
+    share_percent: int = Field(alias="sharePercent")
+    is_current_user: bool = Field(alias="isCurrentUser")
 
 
-class ReportSharedContribution(BaseModel):
-    total: float
-    items: List[ReportSharedContributionItem]
-
-
-class ReportSharedCategoryImpactItem(BaseModel):
+class ReportSharedCategoryBreakdownItem(BaseModel):
     key: str
     icon: str
     name: str
-    actual_amount: float = Field(alias="actualAmount")
-    projected_amount: float = Field(alias="projectedAmount")
-    difference: float
+    total_amount: float = Field(alias="totalAmount")
+    my_share_amount: float = Field(alias="myShareAmount")
+    percent: int
 
 
-class ReportSharedSettlementPreview(BaseModel):
-    current_label: str = Field(alias="currentLabel")
-    current_amount: float = Field(alias="currentAmount")
-    projected_personal_spend: float = Field(alias="projectedPersonalSpend")
-
-
-class ReportSharedSettlementCard(BaseModel):
-    key: str
-    label: str
-    amount: float
-    caption: str
-    tone: str
+class ReportSharedTrendPoint(BaseModel):
+    cycle: str
+    total_shared_spend: float = Field(alias="totalSharedSpend")
+    my_share: float = Field(alias="myShare")
 
 
 class ReportSharedExpenseItem(BaseModel):
@@ -848,11 +965,10 @@ class ReportSharedExpenseItem(BaseModel):
 
 
 class ReportSharedData(BaseModel):
-    hero: ReportSharedHero
-    settlement_overview: List[ReportSharedSettlementCard] = Field(alias="settlementOverview")
-    category_impact: List[ReportSharedCategoryImpactItem] = Field(alias="categoryImpact")
-    settlement_preview: ReportSharedSettlementPreview = Field(alias="settlementPreview")
-    contribution: ReportSharedContribution
+    summary: ReportSharedSummary
+    funding_vs_share: List[ReportSharedParticipantFunding] = Field(alias="fundingVsShare")
+    category_breakdown: List[ReportSharedCategoryBreakdownItem] = Field(alias="categoryBreakdown")
+    trend: List[ReportSharedTrendPoint]
     top_expenses: List[ReportSharedExpenseItem] = Field(alias="topExpenses")
 
 

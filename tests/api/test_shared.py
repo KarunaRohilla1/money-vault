@@ -45,10 +45,11 @@ def test_shared_expenses_wraps_legacy_page_data(monkeypatch):
         lambda payer_vault_id, shared_vault_id: None
     )
 
-    def fake_page_data(shared_vault_id, start_date, end_date, category_id=None, paid_by_vault_id=None):
+    def fake_page_data(shared_vault_id, start_date, end_date, current_participant_id=None, category_id=None, paid_by_vault_id=None):
         observed.update(
             {
                 "category_id": category_id,
+                "current_participant_id": current_participant_id,
                 "end_date": end_date,
                 "paid_by_vault_id": paid_by_vault_id,
                 "shared_vault_id": shared_vault_id,
@@ -79,6 +80,7 @@ def test_shared_expenses_wraps_legacy_page_data(monkeypatch):
     }
     assert observed == {
         "category_id": 8,
+        "current_participant_id": 4,
         "end_date": "2026-07-31",
         "paid_by_vault_id": 4,
         "shared_vault_id": 40,
@@ -116,8 +118,8 @@ def test_shared_dashboard_composes_legacy_shared_helpers(monkeypatch):
         lambda vault_id: (40, "Home", "hash", False, "Shared")
     )
 
-    def fake_expenses(shared_vault_id, start_date, end_date, category_id=None, paid_by_vault_id=None):
-        observed["expenses"] = (shared_vault_id, start_date, end_date, category_id, paid_by_vault_id)
+    def fake_expenses(shared_vault_id, start_date, end_date, current_participant_id=None, category_id=None, paid_by_vault_id=None):
+        observed["expenses"] = (shared_vault_id, start_date, end_date, current_participant_id, category_id, paid_by_vault_id)
         return {
             "expenses": [
                 {
@@ -277,7 +279,7 @@ def test_shared_dashboard_composes_legacy_shared_helpers(monkeypatch):
         "markSettledVisible": True,
         "markSettledEnabled": True
     }
-    assert observed["expenses"] == (40, "2026-07-01", "2026-07-31", None, None)
+    assert observed["expenses"] == (40, "2026-07-01", "2026-07-31", 4, None, None)
 
 def test_shared_bills_wraps_legacy_page_data(monkeypatch):
     client = build_client(monkeypatch)
@@ -515,42 +517,48 @@ def test_shared_settlement_uses_legacy_settle_function(monkeypatch):
     }
 
 
-def test_shared_bill_update_cannot_change_shared_vault(monkeypatch):
-    client = build_client(monkeypatch)
-
-    monkeypatch.setattr(
-        "api.shared.require_shared_bill",
-        lambda bill_id, vault_id: None
-    )
-    monkeypatch.setattr(
-        "api.shared.shared_vault_id_for_bill",
-        lambda bill_id: 41
-    )
-
-    response = client.put(
-        "/api/shared/bills/5",
-        headers=auth_header(),
-        json={
-            "amount": 1200,
-            "dueDay": 10,
-            "frequency": "Monthly",
-            "isActive": True,
-            "name": "Internet",
-            "notes": "",
-            "sharedVaultId": 42
-        }
-    )
-
-    assert response.status_code == 400
-    assert response.json() == {
-        "code": "VALIDATION_ERROR",
-        "message": "Bill shared vault cannot be changed."
-    }
-
-
 def test_shared_routes_require_authentication(monkeypatch):
     client = build_client(monkeypatch)
 
     response = client.get("/api/shared/bills")
 
     assert response.status_code == 401
+
+
+def test_shared_expenses_passes_authenticated_participant_perspective(monkeypatch):
+    client = build_client(monkeypatch)
+    observed_participants = []
+
+    monkeypatch.setattr(
+        "api.shared.resolve_shared_vault_id",
+        lambda vault_id, shared_vault_id=None: 40
+    )
+    monkeypatch.setattr(
+        "api.shared.cycle_bounds",
+        lambda shared_vault_id: ("2026-07-01", "2026-07-31")
+    )
+
+    def fake_page_data(shared_vault_id, start_date, end_date, current_participant_id=None, category_id=None, paid_by_vault_id=None):
+        observed_participants.append(current_participant_id)
+        return {
+            "expenses": [],
+            "summary": {"total_shared_spend": 0}
+        }
+
+    monkeypatch.setattr(
+        "api.shared.get_shared_expenses_page_data",
+        fake_page_data
+    )
+
+    # Call as Vault 4 (Karuna)
+    from api.security import create_access_token
+    token4, _ = create_access_token(SimpleNamespace(id="4", name="Karuna", vault_type="Individual", is_admin=False))
+    response4 = client.get("/api/shared/expenses?sharedVaultId=40", headers={"Authorization": f"Bearer {token4}"})
+    assert response4.status_code == 200
+
+    # Call as Vault 5 (Aman)
+    token5, _ = create_access_token(SimpleNamespace(id="5", name="Aman", vault_type="Individual", is_admin=False))
+    response5 = client.get("/api/shared/expenses?sharedVaultId=40", headers={"Authorization": f"Bearer {token5}"})
+    assert response5.status_code == 200
+
+    assert observed_participants == [4, 5]

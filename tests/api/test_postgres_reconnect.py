@@ -106,7 +106,7 @@ def test_closed_cached_connection_is_discarded_before_use():
     assert selected is healthy_connection
     assert closed_connection in pool.discarded
     assert closed_connection.closed == 1
-    assert healthy_connection.health_checks == 1
+    assert healthy_connection.closed == 0
 
 
 def test_operational_error_on_read_reconnects_and_retries_once():

@@ -2,6 +2,7 @@ import uuid
 
 from db.cache import cache_data, clear_data_cache
 from db.core import EXPENSE, TRANSFER_IN, TRANSFER_OUT, get_connection
+from db.identity import person_display_name_sql
 from db.transaction_shares import cents, money_from_cents
 
 
@@ -37,16 +38,16 @@ def get_shared_vaults_for_personal_with_cursor(cursor, vault_id):
 
 def get_shared_participants_with_cursor(cursor, shared_vault_id):
     return cursor.execute(
-        """
+        f"""
         SELECT
             participant.id,
-            participant.name
+            {person_display_name_sql("participant.id", "participant.name")} AS name
         FROM vault_shares vs
         JOIN vaults participant
             ON vs.shared_vault_id = participant.id
         WHERE vs.vault_id = ?
         AND participant.vault_type = 'Individual'
-        ORDER BY participant.name
+        ORDER BY name
         """,
         (shared_vault_id,)
     ).fetchall()
@@ -822,18 +823,18 @@ def settle_outstanding_settlement(
         )
 
         from_name = cursor.execute(
-            """
-            SELECT name
-            FROM vaults
-            WHERE id = ?
+            f"""
+            SELECT {person_display_name_sql("v.id", "v.name")}
+            FROM vaults v
+            WHERE v.id = ?
             """,
             (from_vault_id,)
         ).fetchone()
         to_name = cursor.execute(
-            """
-            SELECT name
-            FROM vaults
-            WHERE id = ?
+            f"""
+            SELECT {person_display_name_sql("v.id", "v.name")}
+            FROM vaults v
+            WHERE v.id = ?
             """,
             (to_vault_id,)
         ).fetchone()
@@ -972,12 +973,15 @@ def get_shared_recent_activity(shared_vault_id, start_date, end_date, limit=4):
     conn = get_connection()
     try:
         return conn.execute(
-            """
+            f"""
             SELECT
                 t.id,
                 t.date,
                 t.amount,
-                COALESCE(payer.name, 'Unknown') AS payer_name,
+                COALESCE(
+                    {person_display_name_sql("t.vault_id", "payer.name")},
+                    'Unknown'
+                ) AS payer_name,
                 COALESCE(c.name, 'Uncategorized') AS category_name,
                 COALESCE(c.emoji, '🏷️') AS category_icon,
                 COALESCE(t.notes, '') AS notes
@@ -1011,28 +1015,39 @@ def get_shared_expenses_page_data(
     shared_vault_id,
     start_date,
     end_date,
+    current_participant_id=None,
     category_id=None,
     paid_by_vault_id=None
 ):
     conn = get_connection()
     try:
-        participants = conn.execute(
-            """
-            SELECT
-                v.id,
-                v.name
-            FROM vault_shares vs
-            JOIN vaults v
-                ON vs.shared_vault_id = v.id
-            WHERE vs.vault_id = ?
-            AND v.vault_type = 'Individual'
-            ORDER BY v.name
-            """,
-            (shared_vault_id,)
-        ).fetchall()
-        current_participant, other_participants = get_current_participant_context(
-            participants
+        participants = get_shared_participants_with_cursor(
+            conn.cursor(),
+            shared_vault_id
         )
+        if current_participant_id is not None:
+            current_participant = next(
+                (
+                    participant
+                    for participant in participants
+                    if int(participant[0]) == int(current_participant_id)
+                ),
+                None
+            )
+            if current_participant is not None:
+                other_participants = [
+                    participant
+                    for participant in participants
+                    if int(participant[0]) != int(current_participant_id)
+                ]
+            else:
+                current_participant, other_participants = get_current_participant_context(
+                    participants
+                )
+        else:
+            current_participant, other_participants = get_current_participant_context(
+                participants
+            )
         current_participant_id = (
             current_participant[0]
             if current_participant
@@ -1073,7 +1088,10 @@ def get_shared_expenses_page_data(
                 t.date,
                 t.vault_id,
                 t.account_id,
-                COALESCE(payer.name, 'Unknown') AS payer_name,
+                COALESCE(
+                    {person_display_name_sql("t.vault_id", "payer.name")},
+                    'Unknown'
+                ) AS payer_name,
                 t.amount,
                 t.allocation_method,
                 COALESCE(t.notes, '') AS notes,

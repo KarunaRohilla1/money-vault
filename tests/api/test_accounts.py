@@ -156,6 +156,7 @@ def test_opening_balance_zero_is_allowed_for_non_credit_cards(monkeypatch):
     client = build_client(monkeypatch)
     observed = []
 
+    monkeypatch.setattr("api.accounts.account_exists", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(
         "api.accounts.add_account",
         lambda vault_id, name, account_type, opening_balance, is_primary: observed.append(opening_balance),

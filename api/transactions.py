@@ -23,9 +23,11 @@ from api.schemas import (
     TransactionHistorySectionResponse,
     TransactionMonthRangeResponse,
     TransactionResponse,
+    TransactionShareResponse,
     TransactionUpdateRequest,
     VaultContext
 )
+from db.transaction_shares import get_transaction_shares
 from db.transactions import (
     add_transaction,
     delete_transaction,
@@ -277,7 +279,21 @@ def adapt_transaction(row):
     )
 
 
-def adapt_transaction_detail(row):
+def adapt_transaction_detail(row, shares=None):
+    if shares is None:
+        shares = get_transaction_shares(int(row[0])) if row[7] is not None else []
+
+    adapted_shares = [
+        TransactionShareResponse(
+            id=int(share[0]),
+            participantVaultId=int(share[2]),
+            participantName=str(share[3] or ""),
+            shareAmount=float(share[4] or 0),
+            sharePercentage=float(share[5]) if share[5] is not None else None
+        )
+        for share in shares
+    ]
+
     return TransactionDetailResponse(
         id=int(row[0]),
         accountId=int(row[1]),
@@ -294,6 +310,7 @@ def adapt_transaction_detail(row):
         shared=bool(row_value(row, 12)),
         sharedVaultName=row_value(row, 12),
         transferGroupId=row_value(row, 13),
+        shares=adapted_shares,
         createdAt=None,
         updatedAt=None
     )
@@ -354,7 +371,10 @@ def transaction_detail(transaction_id: int, vault: VaultContext = Depends(get_au
         transaction_id,
         vault
     )
-    return adapt_transaction_detail(get_transaction_by_id(transaction_id))
+    return adapt_transaction_detail(
+        get_transaction_by_id(transaction_id),
+        get_transaction_shares(transaction_id)
+    )
 
 
 @router.post("", response_model=TransactionDetailResponse, response_model_by_alias=True)
@@ -400,7 +420,10 @@ def create_transaction(
     except ValueError as error:
         raise bad_request(str(error)) from error
 
-    return adapt_transaction_detail(get_transaction_by_id(transaction_id))
+    return adapt_transaction_detail(
+        get_transaction_by_id(transaction_id),
+        get_transaction_shares(transaction_id)
+    )
 
 
 @router.put("/{transaction_id}", response_model=TransactionDetailResponse, response_model_by_alias=True)
@@ -452,7 +475,10 @@ def update_transaction_route(
     except ValueError as error:
         raise bad_request(str(error)) from error
 
-    return adapt_transaction_detail(get_transaction_by_id(transaction_id))
+    return adapt_transaction_detail(
+        get_transaction_by_id(transaction_id),
+        get_transaction_shares(transaction_id)
+    )
 
 
 @router.delete("/{transaction_id}", response_model=SuccessResponse, response_model_by_alias=True)

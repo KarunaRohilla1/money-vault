@@ -84,14 +84,35 @@ def transaction_belongs_to_vault(transaction_id, vault_id):
         row = conn.execute(
             """
             SELECT 1
-            FROM transactions
-            WHERE id = ?
-            AND vault_id = ?
-            AND is_deleted = 0
+            FROM transactions t
+            WHERE t.id = ?
+            AND t.is_deleted = 0
+            AND (
+                t.vault_id = ?
+                OR t.beneficiary_vault_id = ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM transaction_shares ts
+                    WHERE ts.transaction_id = t.id
+                    AND ts.participant_vault_id = ?
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM vault_shares vs
+                    WHERE (
+                        (vs.vault_id = t.beneficiary_vault_id AND vs.shared_vault_id = ?)
+                        OR (vs.shared_vault_id = t.beneficiary_vault_id AND vs.vault_id = ?)
+                    )
+                )
+            )
             """,
             (
                 transaction_id,
-                vault_id
+                vault_id,
+                vault_id,
+                vault_id,
+                vault_id,
+                vault_id,
             )
         ).fetchone()
         return row is not None
@@ -239,30 +260,6 @@ def shared_vault_accessible_to_vault(shared_vault_id, vault_id):
         conn.close()
 
 
-def shared_bill_belongs_to_accessible_vault(bill_id, vault_id):
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            """
-            SELECT shared_vault_id
-            FROM shared_bills
-            WHERE id = ?
-            AND is_active = 1
-            """,
-            (bill_id,)
-        ).fetchone()
-    finally:
-        conn.close()
-
-    return bool(
-        row
-        and shared_vault_accessible_to_vault(
-            int(row[0]),
-            vault_id
-        )
-    )
-
-
 def shared_bill_instance_belongs_to_accessible_vault(instance_id, vault_id):
     conn = get_connection()
     try:
@@ -275,29 +272,6 @@ def shared_bill_instance_belongs_to_accessible_vault(instance_id, vault_id):
             WHERE i.id = ?
             """,
             (instance_id,)
-        ).fetchone()
-    finally:
-        conn.close()
-
-    return bool(
-        row
-        and shared_vault_accessible_to_vault(
-            int(row[0]),
-            vault_id
-        )
-    )
-
-
-def shared_bill_cycle_belongs_to_accessible_vault(cycle_id, vault_id):
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            """
-            SELECT shared_vault_id
-            FROM shared_bill_cycles
-            WHERE id = ?
-            """,
-            (cycle_id,)
         ).fetchone()
     finally:
         conn.close()
@@ -406,25 +380,9 @@ def require_shared_vault(shared_vault_id, vault_id):
         raise not_found()
 
 
-def require_shared_bill(bill_id, vault_id):
-    if not shared_bill_belongs_to_accessible_vault(
-        bill_id,
-        vault_id
-    ):
-        raise not_found()
-
-
 def require_shared_bill_instance(instance_id, vault_id):
     if not shared_bill_instance_belongs_to_accessible_vault(
         instance_id,
-        vault_id
-    ):
-        raise not_found()
-
-
-def require_shared_bill_cycle(cycle_id, vault_id):
-    if not shared_bill_cycle_belongs_to_accessible_vault(
-        cycle_id,
         vault_id
     ):
         raise not_found()

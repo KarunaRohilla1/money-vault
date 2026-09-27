@@ -1,5 +1,6 @@
 from db.cache import cache_data
 from db.core import get_connection
+from db.identity import person_display_name_sql
 
 
 ALLOCATION_EQUAL = "Equal"
@@ -281,19 +282,19 @@ def get_transaction_shares(transaction_id):
     conn = get_connection()
     try:
         shares = conn.execute(
-            """
+            f"""
             SELECT
                 ts.id,
                 ts.transaction_id,
                 ts.participant_vault_id,
-                v.name,
+                {person_display_name_sql("v.id", "v.name")} AS name,
                 ts.share_amount,
                 ts.share_percentage
             FROM transaction_shares ts
             JOIN vaults v
                 ON ts.participant_vault_id = v.id
             WHERE ts.transaction_id = ?
-            ORDER BY v.name
+            ORDER BY name
             """,
             (transaction_id,)
         ).fetchall()

@@ -75,17 +75,6 @@ def list_accounts(vault: VaultContext = Depends(get_authenticated_vault)):
     ]
 
 
-@router.get("/{account_id}", response_model=AccountResponse, response_model_by_alias=True)
-def account_detail(account_id: int, vault: VaultContext = Depends(get_authenticated_vault)):
-    vault_id = effective_account_vault_id(vault)
-    require_account(
-        account_id,
-        vault_id
-    )
-    row = get_account_by_id(account_id)
-    return adapt_account((*row[:5], None))
-
-
 @router.post("", response_model=SuccessResponse, response_model_by_alias=True)
 def create_account(request: AccountCreateRequest, vault: VaultContext = Depends(get_authenticated_vault)):
     vault_id = int_vault_id(vault)

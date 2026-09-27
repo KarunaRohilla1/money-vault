@@ -20,181 +20,103 @@ def build_client(monkeypatch, *, raise_server_exceptions=True):
     )
 
 
-def test_valid_login_returns_token_and_safe_vault_metadata(monkeypatch):
+def test_username_pin_login_rejects_invalid_credentials(monkeypatch):
     client = build_client(monkeypatch)
-
     monkeypatch.setattr(
-        "api.auth.verify_pin",
-        lambda vault_name, pin: (7, vault_name, "pin-hash", 1, "2026-01-01")
-    )
-    monkeypatch.setattr(
-        "api.auth.get_vault_by_id",
-        lambda vault_id: (vault_id, "Karuna", 1, 1, "Individual")
+        "api.auth.authenticate_user",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(__import__("db.identity", fromlist=["IdentityError"]).IdentityError("Username or PIN is incorrect."))
     )
 
     response = client.post(
         "/api/login",
         json={
-            "vaultName": "Karuna",
-            "pin": "1234"
-        }
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["token"]
-    assert body["vault"] == {
-        "id": "7",
-        "name": "Karuna",
-        "isAdmin": True,
-        "vaultType": "Individual"
-    }
-    assert "expiresAt" in body
-    assert "pin" not in body
-    assert "pin_hash" not in body
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"vaultName": "Exact Vault", "pin": "0123"},
-        {"vault_name": "Exact Vault", "pin": "0123"},
-    ]
-)
-def test_login_accepts_supported_vault_name_fields_and_preserves_pin(monkeypatch, payload):
-    client = build_client(monkeypatch)
-    observed = {}
-
-    def fake_verify_pin(vault_name, pin):
-        observed["vault_name"] = vault_name
-        observed["pin"] = pin
-        return (9, vault_name, "pin-hash", 0, "2026-01-01")
-
-    monkeypatch.setattr("api.auth.verify_pin", fake_verify_pin)
-    monkeypatch.setattr(
-        "api.auth.get_vault_by_id",
-        lambda vault_id: (vault_id, "Exact Vault", 0, 1, "Individual")
-    )
-
-    response = client.post("/api/login", json=payload)
-
-    assert response.status_code == 200
-    assert observed == {
-        "vault_name": "Exact Vault",
-        "pin": "0123"
-    }
-
-
-def test_login_uses_legacy_verify_pin_row_then_loads_safe_vault_metadata(monkeypatch):
-    client = build_client(monkeypatch)
-
-    monkeypatch.setattr(
-        "api.auth.verify_pin",
-        lambda vault_name, pin: (11, vault_name, "pin-hash", 1, "2026-01-01")
-    )
-    monkeypatch.setattr(
-        "api.auth.get_vault_by_id",
-        lambda vault_id: (vault_id, "Shared Vault", 1, 7, "Shared")
-    )
-
-    response = client.post(
-        "/api/login",
-        json={
-            "vaultName": "Shared Vault",
-            "pin": "1234"
-        }
-    )
-
-    assert response.status_code == 200
-    assert response.json()["vault"] == {
-        "id": "11",
-        "name": "Shared Vault",
-        "isAdmin": True,
-        "vaultType": "Shared"
-    }
-
-
-@pytest.mark.parametrize("verify_result", [None, False])
-def test_invalid_pin_and_unknown_vault_return_generic_invalid_credentials(monkeypatch, verify_result):
-    client = build_client(monkeypatch)
-
-    monkeypatch.setattr(
-        "api.auth.verify_pin",
-        lambda _vault_name, _pin: verify_result
-    )
-
-    response = client.post(
-        "/api/login",
-        json={
-            "vault_name": "Unknown",
+            "username": "karuna",
             "pin": "0000"
         }
     )
 
     assert response.status_code == 401
-    assert response.json() == {
-        "code": "INVALID_CREDENTIALS",
-        "message": "Invalid vault credentials."
-    }
+    assert response.json()["code"] == "INVALID_CREDENTIALS"
+    assert "0000" not in response.text
 
 
-def test_login_database_error_returns_safe_api_error(monkeypatch):
-    client = build_client(
-        monkeypatch,
-        raise_server_exceptions=False
+def test_register_and_login_return_user_session(monkeypatch):
+    from db.identity import ProfileRecord, VaultRecord
+
+    client = build_client(monkeypatch)
+    profile = ProfileRecord(
+        id="11111111-1111-4111-8111-111111111111",
+        username="karuna",
+        display_name="Karuna",
+        pin_hash="hashed",
+        active_vault_id=4
     )
+    personal = VaultRecord(id="4", name="Personal", is_admin=False, vault_type="Individual")
+    monkeypatch.setattr("api.auth.register_user", lambda *_args, **_kwargs: (profile, personal))
+    monkeypatch.setattr("api.auth.authenticate_user", lambda *_args, **_kwargs: (profile, personal))
+    monkeypatch.setattr("api.auth.issue_recovery_code", lambda *_args, **_kwargs: "ABCD-EFGH-IJKL")
+    monkeypatch.setattr("api.auth.set_active_vault", lambda *_args, **_kwargs: None)
 
-    from db.postgres import OperationalError
-
-    def raise_database_error(_vault_name, _pin):
-        raise OperationalError("server closed the connection unexpectedly")
-
-    monkeypatch.setattr(
-        "api.auth.verify_pin",
-        raise_database_error
+    register_response = client.post(
+        "/api/register",
+        json={
+            "username": "karuna",
+            "displayName": "Karuna",
+            "pin": "1234",
+            "confirmPin": "1234"
+        }
     )
-
-    response = client.post(
+    login_response = client.post(
         "/api/login",
         json={
-            "vault_name": "Vault",
-            "pin": "0000"
+            "username": "karuna",
+            "pin": "1234"
         }
     )
 
-    assert response.status_code == 500
-    assert response.json() == {
-        "code": "SERVER_ERROR",
-        "message": "Unexpected server error."
-    }
-    assert "server closed" not in response.text
+    assert register_response.status_code == 200
+    assert login_response.status_code == 200
+    assert register_response.json()["userId"] == profile.id
+    assert register_response.json()["displayName"] == "Karuna"
+    assert register_response.json()["pinSet"] is True
+    assert register_response.json()["recoveryCode"] == "ABCD-EFGH-IJKL"
+    assert "recoveryCode" not in login_response.json()
+    assert register_response.json()["vault"]["name"] == "Personal"
+    assert login_response.json()["token"]
+    assert "1234" not in register_response.text
 
 
-def test_login_response_never_contains_pin_or_pin_hash(monkeypatch):
+def test_register_rejects_short_pin(monkeypatch):
     client = build_client(monkeypatch)
 
-    monkeypatch.setattr(
-        "api.auth.verify_pin",
-        lambda vault_name, _pin: (1, vault_name, "sensitive-pin-hash", 0, "2026-01-01")
-    )
-    monkeypatch.setattr(
-        "api.auth.get_vault_by_id",
-        lambda vault_id: (vault_id, "Vault", 0, 1, "Shared")
-    )
-
     response = client.post(
-        "/api/login",
+        "/api/register",
         json={
-            "vaultName": "Vault",
-            "pin": "9999"
+            "username": "karuna",
+            "displayName": "Karuna",
+            "pin": "12",
+            "confirmPin": "12"
         }
     )
-    encoded = response.text.lower()
 
-    assert response.status_code == 200
-    assert "9999" not in encoded
-    assert "sensitive-pin-hash" not in encoded
-    assert "pin_hash" not in encoded
+    assert response.status_code == 422
+
+
+def test_register_rejects_pin_mismatch(monkeypatch):
+    client = build_client(monkeypatch)
+
+    response = client.post(
+        "/api/register",
+        json={
+            "username": "karuna",
+            "displayName": "Karuna",
+            "pin": "1234",
+            "confirmPin": "5678"
+        }
+    )
+
+    assert response.status_code == 400
+    assert "1234" not in response.text
 
 
 def test_valid_jwt_is_accepted(monkeypatch):
@@ -281,13 +203,15 @@ def test_session_validation_returns_active_and_authenticated_vault(monkeypatch):
             "id": 4,
             "name": "Personal vault",
             "isAdmin": True,
-            "vaultType": "Individual"
+            "vaultType": "Individual",
+            "role": "owner"
         },
         {
             "id": 12,
             "name": "Shared vault",
             "isAdmin": False,
-            "vaultType": "Shared"
+            "vaultType": "Shared",
+            "role": "member"
         }
     ]
 
@@ -311,26 +235,20 @@ def test_connected_shared_vault_listing_is_scoped_to_authenticated_personal_vaul
             "id": 12,
             "name": "Shared vault",
             "isAdmin": False,
-            "vaultType": "Shared"
+            "vaultType": "Shared",
+            "role": "member",
+            "memberCount": 0
         }
     ]
 
 
-def test_shared_vault_activation_requires_correct_shared_pin(monkeypatch):
+def test_shared_vault_activation_does_not_require_pin(monkeypatch):
     client = build_client(monkeypatch)
     install_vault_lookup(monkeypatch)
-    observed = {}
     monkeypatch.setattr(
         "api.auth.get_connected_shared_vaults",
         lambda vault_id: [(12, "Shared vault")] if str(vault_id) == "4" else []
     )
-
-    def fake_verify_pin(vault_name, pin):
-        observed["vault_name"] = vault_name
-        observed["pin"] = pin
-        return (12, "Shared vault", "hash", 0, "2026-01-01")
-
-    monkeypatch.setattr("api.auth.verify_pin", fake_verify_pin)
 
     response = client.post(
         "/api/vaults/shared/activate",
@@ -342,34 +260,23 @@ def test_shared_vault_activation_requires_correct_shared_pin(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert observed == {
-        "vault_name": "Shared vault",
-        "pin": "0123"
-    }
     body = response.json()
     assert body["token"]
     assert body["vault"]["id"] == "12"
     assert body["vault"]["vaultType"] == "Shared"
     assert body["authenticatedVault"]["id"] == "4"
     assert "0123" not in response.text
-    assert "hash" not in response.text
+
 
 
 
 def test_shared_vault_activation_without_pin_for_connected_vault(monkeypatch):
     client = build_client(monkeypatch)
     install_vault_lookup(monkeypatch)
-    observed = {"verify_called": False}
     monkeypatch.setattr(
         "api.auth.get_connected_shared_vaults",
         lambda vault_id: [(12, "Shared vault")] if str(vault_id) == "4" else []
     )
-
-    def fake_verify_pin(_vault_name, _pin):
-        observed["verify_called"] = True
-        return None
-
-    monkeypatch.setattr("api.auth.verify_pin", fake_verify_pin)
 
     response = client.post(
         "/api/vaults/shared/activate",
@@ -380,37 +287,11 @@ def test_shared_vault_activation_without_pin_for_connected_vault(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert observed["verify_called"] is False
     body = response.json()
     assert body["token"]
     assert body["vault"]["id"] == "12"
     assert body["vault"]["vaultType"] == "Shared"
     assert body["authenticatedVault"]["id"] == "4"
-
-def test_shared_vault_activation_rejects_wrong_pin_without_switching(monkeypatch):
-    client = build_client(monkeypatch)
-    install_vault_lookup(monkeypatch)
-    monkeypatch.setattr(
-        "api.auth.get_connected_shared_vaults",
-        lambda vault_id: [(12, "Shared vault")] if str(vault_id) == "4" else []
-    )
-    monkeypatch.setattr("api.auth.verify_pin", lambda _vault_name, _pin: None)
-
-    response = client.post(
-        "/api/vaults/shared/activate",
-        headers=auth_header_for(personal_vault()),
-        json={
-            "sharedVaultId": 12,
-            "pin": "9999"
-        }
-    )
-
-    assert response.status_code == 401
-    assert response.json() == {
-        "code": "INVALID_CREDENTIALS",
-        "message": "Invalid vault credentials."
-    }
-
 
 def test_unrelated_shared_vault_cannot_be_activated(monkeypatch):
     client = build_client(monkeypatch)
@@ -419,7 +300,6 @@ def test_unrelated_shared_vault_cannot_be_activated(monkeypatch):
         "api.auth.get_connected_shared_vaults",
         lambda vault_id: [(12, "Shared vault")] if str(vault_id) == "4" else []
     )
-    monkeypatch.setattr("api.auth.verify_pin", lambda _vault_name, _pin: (99, "Unrelated", "hash", 0, "2026-01-01"))
 
     response = client.post(
         "/api/vaults/shared/activate",
@@ -487,3 +367,184 @@ def test_malformed_jwt_is_rejected(monkeypatch):
 
     with pytest.raises(AuthError):
         verify_access_token("not-a-jwt")
+
+
+def user_vault_context():
+    from api.schemas import VaultContext
+
+    return VaultContext(
+        id="4",
+        name="Personal vault",
+        isAdmin=True,
+        vaultType="Individual",
+        authenticatedVaultId="4",
+        authenticatedVaultName="Personal vault",
+        authenticatedVaultType="Individual",
+        userId="11111111-1111-4111-8111-111111111111",
+        pinSet=True
+    )
+
+
+def test_shared_vault_listing_uses_memberships_for_user_tokens(monkeypatch):
+    from db.identity import SharedVaultMembership
+
+    client = build_client(monkeypatch)
+    monkeypatch.setattr("api.dependencies.verify_access_token", lambda _token: user_vault_context())
+    monkeypatch.setattr(
+        "api.auth.list_shared_memberships_for_user",
+        lambda user_id: [
+            SharedVaultMembership(id="12", name="Our Money", role="owner", member_count=2),
+            SharedVaultMembership(id="40", name="Trip Fund", role="member", member_count=3),
+        ],
+    )
+
+    response = client.get("/api/vaults/shared", headers={"Authorization": "Bearer jwt-token"})
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": 12,
+            "name": "Our Money",
+            "isAdmin": True,
+            "vaultType": "Shared",
+            "role": "owner",
+            "memberCount": 2,
+        },
+        {
+            "id": 40,
+            "name": "Trip Fund",
+            "isAdmin": False,
+            "vaultType": "Shared",
+            "role": "member",
+            "memberCount": 3,
+        },
+    ]
+
+
+def test_create_shared_vault_returns_invite_code(monkeypatch):
+    from db.identity import ProfileRecord, VaultRecord
+
+    client = build_client(monkeypatch)
+    profile = ProfileRecord(
+        id="11111111-1111-4111-8111-111111111111",
+        username="karuna",
+        display_name="Karuna",
+        pin_hash="hashed",
+        active_vault_id=4
+    )
+    created = []
+
+    monkeypatch.setattr("api.dependencies.verify_access_token", lambda _token: user_vault_context())
+    monkeypatch.setattr("api.auth.get_vault_by_id", lambda vault_id: (4, "Personal vault", 1, 1, "Individual"))
+    monkeypatch.setattr("api.auth.get_profile", lambda user_id: profile)
+    monkeypatch.setattr(
+        "api.auth.create_shared_vault_for_user",
+        lambda user_id, name: created.append((user_id, name)) or VaultRecord(id="40", name=name, is_admin=False, vault_type="Shared")
+    )
+
+    response = client.post(
+        "/api/vaults/shared/create",
+        headers={"Authorization": "Bearer jwt-token"},
+        json={"vaultName": "Household"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert created == [(profile.id, "Household")]
+    assert body["inviteCode"] == "MV-000040"
+    assert body["vault"] == {"id": "40", "name": "Household", "isAdmin": False, "vaultType": "Shared", "role": "member"}
+    assert body["authenticatedVault"]["id"] == "4"
+    assert body["userId"] == profile.id
+
+
+def test_join_shared_vault_uses_invite_code(monkeypatch):
+    from db.identity import ProfileRecord, VaultRecord
+
+    client = build_client(monkeypatch)
+    profile = ProfileRecord(
+        id="11111111-1111-4111-8111-111111111111",
+        username="karuna",
+        display_name="Karuna",
+        pin_hash="hashed",
+        active_vault_id=4
+    )
+    joined = []
+
+    monkeypatch.setattr("api.dependencies.verify_access_token", lambda _token: user_vault_context())
+    monkeypatch.setattr("api.auth.get_vault_by_id", lambda vault_id: (4, "Personal vault", 1, 1, "Individual"))
+    monkeypatch.setattr("api.auth.get_profile", lambda user_id: profile)
+    monkeypatch.setattr(
+        "api.auth.join_shared_vault_for_user",
+        lambda user_id, invite_code: joined.append((user_id, invite_code)) or VaultRecord(id="40", name="Household", is_admin=False, vault_type="Shared")
+    )
+
+    response = client.post(
+        "/api/vaults/shared/join",
+        headers={"Authorization": "Bearer jwt-token"},
+        json={"inviteCode": "MV-000040"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert joined == [(profile.id, "MV-000040")]
+    assert body["vault"]["id"] == "40"
+    assert body["vault"]["vaultType"] == "Shared"
+    assert body["authenticatedVault"]["id"] == "4"
+
+
+def test_recover_pin_with_valid_recovery_code(monkeypatch):
+    from db.identity import ProfileRecord, VaultRecord
+
+    client = build_client(monkeypatch)
+    profile = ProfileRecord(
+        id="11111111-1111-4111-8111-111111111111",
+        username="karuna",
+        display_name="Karuna",
+        pin_hash="hashed",
+        active_vault_id=4
+    )
+    personal = VaultRecord(id="4", name="Personal", is_admin=False, vault_type="Individual")
+    monkeypatch.setattr(
+        "api.auth.recover_pin_with_recovery_code",
+        lambda *_args, **_kwargs: (profile, personal)
+    )
+    monkeypatch.setattr("api.auth.set_active_vault", lambda *_args, **_kwargs: None)
+
+    response = client.post(
+        "/api/recover-pin",
+        json={
+            "username": "karuna",
+            "recoveryCode": "ABCD-EFGH-IJKL",
+            "newPin": "5678",
+            "confirmPin": "5678"
+        }
+    )
+
+    assert response.status_code == 200
+    assert response.json()["userId"] == profile.id
+    assert response.json()["vault"]["vaultType"] == "Individual"
+    assert "5678" not in response.text
+    assert "ABCD-EFGH-IJKL" not in response.text
+
+
+def test_recover_pin_rejects_invalid_recovery_code(monkeypatch):
+    client = build_client(monkeypatch)
+    monkeypatch.setattr(
+        "api.auth.recover_pin_with_recovery_code",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            __import__("db.identity", fromlist=["IdentityError"]).IdentityError("Recovery code is invalid.")
+        )
+    )
+
+    response = client.post(
+        "/api/recover-pin",
+        json={
+            "username": "karuna",
+            "recoveryCode": "AAAA-BBBB-CCCC",
+            "newPin": "5678",
+            "confirmPin": "5678"
+        }
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "INVALID_RECOVERY_CODE"

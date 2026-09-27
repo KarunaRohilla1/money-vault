@@ -155,7 +155,7 @@ def test_reports_scope_to_authenticated_vault(monkeypatch):
     }
     assert [row["label"] for row in body["data"]["sharedInsights"]] == [
         "Paid by you",
-        "Received by you",
+        "Covered for you",
         "You owe",
         "You are owed",
         "Settlements completed",
@@ -285,3 +285,36 @@ def test_reports_spending_returns_single_mobile_contract(monkeypatch):
     assert body["data"]["trend"]["points"][0] == {"amount": 1000.0, "date": "2026-07-10", "label": "10"}
     assert observed["calls"][0][0] == 4
     assert observed["calls"][0][4]["account"] == "HDFC"
+
+
+def test_reports_shared_analytics_payload(monkeypatch):
+    selected = cycle()
+    previous = cycle("2026-06-10", "2026-07-09", "Completed")
+    monkeypatch.setattr("api.reports.get_current_cycle", lambda vault_id: selected)
+    monkeypatch.setattr("api.reports.build_cycle_navigation_options", lambda vault_id: [
+        {"key": previous.start_iso, "label": "Previous", "cycle": previous},
+        {"key": selected.start_iso, "label": "Current", "cycle": selected},
+    ])
+    monkeypatch.setattr("api.reports.get_cycle_for_date", lambda vault_id, start: previous if start == previous.start_iso else selected)
+    monkeypatch.setattr("api.reports.is_shared_vault", lambda vault_id: False)
+    monkeypatch.setattr("api.reports.get_shared_vaults_for_personal_with_cursor", lambda conn, vault_id: [(40, "Shared Home")])
+    monkeypatch.setattr("api.reports.get_shared_participants_with_cursor", lambda cursor, shared_vault_id: [(4, "Karuna"), (5, "Aman")])
+    monkeypatch.setattr("api.reports._accumulate_shared_expense_totals", lambda cursor, shared_vault_id, p_ids, end_iso, start_iso: ({4: 600000, 5: 400000}, {4: 500000, 5: 500000}))
+
+    client = build_client(monkeypatch)
+    response = client.get("/api/reports/shared?cycleStart=2026-07-10", headers=auth_header(monkeypatch))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "summary" in body["data"]
+    assert "fundingVsShare" in body["data"]
+    assert "categoryBreakdown" in body["data"]
+    assert "trend" in body["data"]
+    assert "topExpenses" in body["data"]
+    assert len(body["data"]["fundingVsShare"]) == 2
+    assert body["data"]["fundingVsShare"][0]["name"] == "Karuna"
+    assert body["data"]["fundingVsShare"][0]["isCurrentUser"] is True
+    assert body["data"]["fundingVsShare"][0]["paidAmount"] == 6000.0
+    assert body["data"]["fundingVsShare"][0]["shareAmount"] == 5000.0
+    assert body["data"]["fundingVsShare"][0]["netDifference"] == 1000.0
+

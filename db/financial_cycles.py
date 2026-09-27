@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 
 from db.cache import cache_data, clear_data_cache
 from db.core import get_connection
+from db.identity import person_display_name_sql
 
 
 ACTIVE = "ACTIVE"
@@ -120,7 +121,9 @@ def date_for_cycle_day(year, month, start_day):
     )
 
 
-def derive_cycle_status(cycle_start, cycle_end, today=None):
+def derive_cycle_status(cycle_start, cycle_end, today=None, closed_at=None):
+    if closed_at is not None:
+        return COMPLETED
     today = today or date.today()
     if today < cycle_start:
         return UPCOMING
@@ -206,28 +209,29 @@ def row_to_context(row):
         return None
     start_date = parse_date(row[2])
     end_date = parse_date(row[3])
+    closed_at = row[5] if len(row) > 5 else None
     return CycleContext(
         id=row[0],
         vault_id=row[1],
         start_date=start_date,
         end_date=end_date,
-        status=derive_cycle_status(start_date, end_date),
-        closed_at=row[5] if len(row) > 5 else None
+        status=derive_cycle_status(start_date, end_date, closed_at=closed_at),
+        closed_at=closed_at
     )
 
 
 def get_participant_income_ratios_with_cursor(cursor, shared_vault_id):
     participants = cursor.execute(
-        """
+        f"""
         SELECT
             v.id,
-            v.name
+            {person_display_name_sql("v.id", "v.name")} AS name
         FROM vault_shares vs
         JOIN vaults v
             ON v.id = vs.shared_vault_id
         WHERE vs.vault_id = ?
         AND v.vault_type = 'Individual'
-        ORDER BY v.name
+        ORDER BY name
         """,
         (shared_vault_id,)
     ).fetchall()
@@ -425,13 +429,14 @@ def get_cycle_context_with_cursor(cursor, vault_id, target_date=None):
     ).fetchone()
 
     if existing:
+        closed_at = existing[5] if len(existing) > 5 else None
         return CycleContext(
             id=existing[0],
             vault_id=existing[1],
             start_date=start,
             end_date=end,
-            status=derive_cycle_status(start, end),
-            closed_at=existing[5] if len(existing) > 5 else None
+            status=derive_cycle_status(start, end, closed_at=closed_at),
+            closed_at=closed_at
         )
 
     return build_cycle_context(
@@ -469,12 +474,33 @@ def initialize_financial_cycles():
         conn.close()
 
 
+def get_current_cycle_with_cursor(cursor, vault_id):
+    cycle = get_cycle_context_with_cursor(
+        cursor,
+        vault_id,
+        date.today()
+    )
+    while cycle and cycle.closed_at is not None:
+        next_date = cycle.end_date + timedelta(days=1)
+        next_cycle = get_cycle_context_with_cursor(
+            cursor,
+            vault_id,
+            next_date
+        )
+        if not next_cycle or next_cycle.start_date <= cycle.start_date:
+            break
+        cycle = next_cycle
+    return cycle
+
+
 @cache_data(ttl=60)
 def get_current_cycle(vault_id):
-    return get_cycle_for_date(
-        vault_id,
-        date.today().isoformat()
-    )
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        return get_current_cycle_with_cursor(cursor, vault_id)
+    finally:
+        conn.close()
 
 
 @cache_data(ttl=60)
@@ -497,13 +523,14 @@ def get_active_cycle(vault_id):
     return get_current_cycle(vault_id)
 
 
-def build_cycle_context(vault_id, start, end):
+def build_cycle_context(vault_id, start, end, closed_at=None):
     return CycleContext(
         id=0,
         vault_id=vault_id,
         start_date=start,
         end_date=end,
-        status=derive_cycle_status(start, end)
+        status=derive_cycle_status(start, end, closed_at=closed_at),
+        closed_at=closed_at
     )
 
 

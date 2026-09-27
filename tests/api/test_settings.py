@@ -60,7 +60,7 @@ def test_update_settings_persists_onboarding_values(monkeypatch):
     assert response.status_code == 200
     assert observed == {
         "vault_id": 4,
-        "name": "New personal vault",
+        "name": "Personal",
         "month_start_day": 10,
         "monthly_savings_goal": 2500
     }
@@ -115,7 +115,70 @@ def test_update_settings_returns_safe_validation_error(monkeypatch):
     }
 
 
+def test_update_settings_allows_duplicate_personal_vault_names(monkeypatch):
+    """Cycle-day updates must not fail when another vault is also named Personal."""
+    client = build_client(monkeypatch)
+    observed = {}
+
+    monkeypatch.setattr("api.settings.get_vault_by_id", lambda vault_id: vault_row("Personal"))
+    monkeypatch.setattr("api.settings.get_vault_financial_settings", lambda vault_id: (5, 0))
+    monkeypatch.setattr("api.settings.accessible_vaults_for", lambda current: [api_vault(current)])
+
+    def fake_update_vault(vault_id, name, **kwargs):
+        observed["vault_id"] = vault_id
+        observed["name"] = name
+        observed.update(kwargs)
+
+    monkeypatch.setattr("api.settings.update_vault", fake_update_vault)
+
+    response = client.patch(
+        "/api/settings",
+        headers=auth_header(),
+        json={"cycleStartDay": 5}
+    )
+
+    assert response.status_code == 200
+    assert observed["month_start_day"] == 5
+    assert observed["name"] == "Personal"
+
+
+def test_update_vault_skips_name_uniqueness_when_name_unchanged(monkeypatch):
+    from db.vaults import update_vault
+
+    executed = []
+
+    class FakeConn:
+        def execute(self, sql, params=None, **_kwargs):
+            executed.append((sql.strip(), params))
+            if "SELECT name" in sql:
+                return FakeResult(("Personal",))
+            if "SELECT id" in sql and "LOWER(name)" in sql:
+                raise AssertionError("Name uniqueness check should be skipped when name is unchanged")
+            return FakeResult(None)
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    class FakeResult:
+        def __init__(self, row):
+            self._row = row
+
+        def fetchone(self):
+            return self._row
+
+    monkeypatch.setattr("db.vaults.get_connection", lambda: FakeConn())
+    monkeypatch.setattr("db.vaults.clear_data_cache", lambda *_args, **_kwargs: None)
+
+    update_vault(4, "Personal", month_start_day=15)
+
+    assert any("financial_cycle_start_day" in sql for sql, _params in executed)
+
+
 def api_vault(row):
     from api.settings import adapt_vault
 
     return adapt_vault(row)
+

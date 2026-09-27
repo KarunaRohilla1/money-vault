@@ -3,7 +3,11 @@ import sqlite3
 import pytest
 
 from db.core import EXPENSE, TRANSFER_IN, TRANSFER_OUT
-from db.shared_expenses import build_settlements_from_balances, get_shared_balances_with_cursor
+from db.shared_expenses import (
+    build_settlements_from_balances,
+    get_shared_balances_with_cursor,
+    get_shared_participants_with_cursor,
+)
 
 
 @pytest.fixture
@@ -39,6 +43,21 @@ def shared_balance_db(tmp_path):
             transaction_id INTEGER NOT NULL,
             participant_vault_id INTEGER NOT NULL,
             share_amount REAL NOT NULL
+        );
+
+        CREATE TABLE profiles (
+            id TEXT PRIMARY KEY,
+            username TEXT,
+            display_name TEXT,
+            pin_hash TEXT,
+            active_vault_id INTEGER
+        );
+
+        CREATE TABLE vault_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vault_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'owner'
         );
 
         INSERT INTO vaults (id, name, vault_type) VALUES
@@ -169,3 +188,41 @@ def test_prior_cycle_settlement_clears_carried_balance(shared_balance_db):
 
     assert all(item["balance"] == 0 for item in balances)
     assert build_settlements_from_balances(balances) == []
+
+
+def test_shared_expenses_resolves_profile_display_name(shared_balance_db):
+    connection = sqlite3.connect(shared_balance_db)
+    # Set vault names to "Personal" as in standard architecture
+    connection.execute("UPDATE vaults SET name = 'Personal' WHERE vault_type = 'Individual'")
+    # Insert profiles and vault_members
+    connection.executemany(
+        """
+        INSERT INTO profiles (id, username, display_name) VALUES (?, ?, ?)
+        """,
+        [
+            ("user-1", "karuna", "Karuna Rohilla"),
+            ("user-2", "asfar", "Asfar Sharief"),
+        ]
+    )
+    connection.executemany(
+        """
+        INSERT INTO vault_members (vault_id, user_id, role) VALUES (?, ?, 'owner')
+        """,
+        [
+            (4, "user-1"),
+            (5, "user-2"),
+        ]
+    )
+    connection.commit()
+
+    participants = get_shared_participants_with_cursor(
+        connection.cursor(),
+        40
+    )
+    connection.close()
+
+    names = [row[1] for row in participants]
+    assert "Karuna Rohilla" in names
+    assert "Asfar Sharief" in names
+    assert "Personal" not in names
+

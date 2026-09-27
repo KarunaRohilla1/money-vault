@@ -1,9 +1,9 @@
 from db.core import (
     ensure_default_category_with_cursor,
-    get_connection,
-    hash_pin
+    get_connection
 )
 from db.cache import cache_data, clear_data_cache
+from db.identity import person_display_name_sql
 
 
 def validate_pin(pin):
@@ -29,55 +29,6 @@ def vault_exists():
 
     finally:
         conn.close()
-def verify_pin(vault_name, pin):
-
-    conn = get_connection()
-    try:
-        pin_hash = hash_pin(pin)
-
-        vault = conn.execute(
-            """
-            SELECT
-                id,
-                name,
-                pin_hash,
-                is_admin,
-                created_at
-            FROM vaults
-            WHERE name = ?
-            AND pin_hash = ?
-            """,
-            (
-                vault_name,
-                pin_hash
-            )
-        ).fetchone()
-
-
-        return vault
-
-    finally:
-        conn.close()
-@cache_data(ttl=60)
-def get_vaults():
-
-    conn = get_connection()
-    try:
-
-        vaults = conn.execute(
-            """
-            SELECT id, name
-            FROM vaults
-            ORDER BY name
-            """
-        ).fetchall()
-
-
-        return vaults
-
-
-    finally:
-        conn.close()
 def create_vault(
     name,
     pin,
@@ -97,18 +48,16 @@ def create_vault(
             INSERT INTO vaults
             (
                 name,
-                pin_hash,
                 month_start_day,
                 financial_cycle_start_day,
                 monthly_savings_goal,
                 vault_type,
                 is_admin
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 name,
-                hash_pin(pin),
                 1,
                 1,
                 0,
@@ -166,21 +115,39 @@ def update_vault(
     conn = get_connection()
     try:
 
-        existing = conn.execute(
+        current = conn.execute(
             """
-            SELECT id
+            SELECT name
             FROM vaults
-            WHERE LOWER(name) = LOWER(?)
-            AND id != ?
+            WHERE id = ?
             """,
-            (
-                vault_name,
-                vault_id
-            )
+            (vault_id,)
         ).fetchone()
 
-        if existing:
-            raise ValueError("A vault with this name already exists.")
+        if not current:
+            raise ValueError("Vault not found.")
+
+        current_name = str(current[0] or "").strip()
+        name_changed = current_name.casefold() != vault_name.casefold()
+
+        # Personal vaults across users share the default name "Personal".
+        # Only enforce uniqueness when the name is actually being changed.
+        if name_changed:
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM vaults
+                WHERE LOWER(name) = LOWER(?)
+                AND id != ?
+                """,
+                (
+                    vault_name,
+                    vault_id
+                )
+            ).fetchone()
+
+            if existing:
+                raise ValueError("A vault with this name already exists.")
 
         updates = [
             "name = ?"
@@ -189,14 +156,6 @@ def update_vault(
             vault_name
         ]
 
-        if pin:
-            validate_pin(pin)
-            updates.append(
-                "pin_hash = ?"
-            )
-            params.append(
-                hash_pin(pin)
-            )
 
         if is_admin is not None:
             updates.append(
@@ -366,16 +325,16 @@ def get_shared_vault_participants(shared_vault_id):
     try:
 
         participants = conn.execute(
-            """
+            f"""
             SELECT
                 participant.id,
-                participant.name
+                {person_display_name_sql("participant.id", "participant.name")} AS name
             FROM vault_shares vs
             JOIN vaults participant
                 ON vs.shared_vault_id = participant.id
             WHERE vs.vault_id = ?
             AND participant.vault_type = 'Individual'
-            ORDER BY participant.name
+            ORDER BY name
             """,
             (shared_vault_id,)
         ).fetchall()
@@ -456,77 +415,8 @@ def get_all_vaults():
 
     finally:
         conn.close()
-def promote_to_admin(vault_name):
-
-    conn = get_connection()
-    try:
-
-        conn.execute(
-            """
-            UPDATE vaults
-            SET is_admin = 1
-            WHERE name = ?
-            """,
-            (vault_name,)
-        )
-
-        affected_rows = conn.total_changes
-
-        conn.commit()
-        clear_data_cache((
-            "vaults",
-            "dashboard",
-            "reports"
-        ))
-
-        return affected_rows
 
 
-    finally:
-        conn.close()
-def demote_admin(vault_name):
-
-    conn = get_connection()
-    try:
-
-        conn.execute(
-            """
-            UPDATE vaults
-            SET is_admin = 0
-            WHERE name = ?
-            """,
-            (vault_name,)
-        )
-
-        conn.commit()
-        clear_data_cache((
-            "vaults",
-            "dashboard",
-            "reports"
-        ))
-
-    finally:
-        conn.close()
-@cache_data(ttl=60)
-def get_admin_count():
-
-    conn = get_connection()
-    try:
-
-        count = conn.execute(
-            """
-            SELECT COUNT(*)
-            FROM vaults
-            WHERE is_admin = 1
-            """
-        ).fetchone()[0]
-
-
-        return count
-
-
-    finally:
-        conn.close()
 def delete_vault(vault_id):
     conn = get_connection()
     try:

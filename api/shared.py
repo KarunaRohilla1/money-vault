@@ -8,15 +8,12 @@ from api.resources import (
     bad_request,
     int_vault_id,
     require_category,
-    require_shared_bill,
-    require_shared_bill_cycle,
     require_shared_bill_instance,
     require_shared_participant,
     require_shared_vault
 )
 from api.schemas import (
     SharedBillPaymentRequest,
-    SharedBillRequest,
     SharedPageResponse,
     SharedSettlementRequest,
     SuccessResponse,
@@ -26,15 +23,10 @@ from db.financial_cycles import get_current_cycle
 from db.accounts import get_accounts_with_balances
 from db.core import get_connection
 from db.shared_bills import (
-    add_shared_bill,
-    cancel_shared_bill,
-    close_cycle,
-    duplicate_shared_bill,
     get_shared_bills_page_data,
     get_shared_bills_summary,
     mark_bill_paid,
-    skip_bill_instance,
-    update_shared_bill
+    skip_bill_instance
 )
 from db.shared_expenses import (
     get_settlement_summary,
@@ -97,27 +89,6 @@ def shared_vault_id_for_instance(instance_id):
     return int(row[0])
 
 
-def shared_vault_id_for_bill(bill_id):
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            """
-            SELECT shared_vault_id
-            FROM shared_bills
-            WHERE id = ?
-            """,
-            (bill_id,)
-        ).fetchone()
-    finally:
-        conn.close()
-
-    if not row:
-        raise bad_request("Bill not found.")
-
-    return int(row[0])
-
-
-
 def current_personal_vault_id(vault):
     if vault.vault_type == "Shared" and vault.authenticated_vault_id:
         return int(vault.authenticated_vault_id)
@@ -177,7 +148,8 @@ def build_shared_dashboard_payload(vault, shared_vault_id):
     expenses = get_shared_expenses_page_data(
         shared_vault_id,
         start_date,
-        end_date
+        end_date,
+        current_participant_id=personal_vault_id
     )
     shared_summary = get_shared_vault_summary(
         shared_vault_id,
@@ -431,18 +403,19 @@ def shared_expenses(
         shared_vault_id
     )
     start_date, end_date = cycle_bounds(selected_id)
-
     if paid_by_vault_id is not None:
         require_shared_participant(
             paid_by_vault_id,
             selected_id
         )
 
+    personal_vault_id = current_personal_vault_id(vault)
     return SharedPageResponse(
         data=get_shared_expenses_page_data(
             selected_id,
             date_from or start_date,
             date_to or end_date,
+            current_participant_id=personal_vault_id,
             category_id=category_id,
             paid_by_vault_id=paid_by_vault_id
         )
@@ -521,97 +494,6 @@ def shared_bills(
     )
 
 
-@router.post("/bills", response_model=SuccessResponse, response_model_by_alias=True)
-def create_shared_bill(request: SharedBillRequest, vault: VaultContext = Depends(get_authenticated_vault)):
-    vault_id = int_vault_id(vault)
-    require_shared_vault(
-        request.shared_vault_id,
-        vault_id
-    )
-    if request.category_id is not None:
-        require_category(
-            request.category_id,
-            request.shared_vault_id
-        )
-    try:
-        add_shared_bill(
-            request.shared_vault_id,
-            request.name,
-            request.amount,
-            request.due_day,
-            category_id=request.category_id,
-            notes=request.notes,
-            frequency=request.frequency,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            is_active=request.is_active
-        )
-    except ValueError as error:
-        raise bad_request(str(error)) from error
-    return SuccessResponse()
-
-
-@router.put("/bills/{bill_id}", response_model=SuccessResponse, response_model_by_alias=True)
-def update_shared_bill_route(
-    bill_id: int,
-    request: SharedBillRequest,
-    vault: VaultContext = Depends(get_authenticated_vault)
-):
-    vault_id = int_vault_id(vault)
-    require_shared_bill(
-        bill_id,
-        vault_id
-    )
-    existing_shared_vault_id = shared_vault_id_for_bill(bill_id)
-    if existing_shared_vault_id != request.shared_vault_id:
-        raise bad_request("Bill shared vault cannot be changed.")
-    require_shared_vault(
-        request.shared_vault_id,
-        vault_id
-    )
-    if request.category_id is not None:
-        require_category(
-            request.category_id,
-            request.shared_vault_id
-        )
-    try:
-        update_shared_bill(
-            bill_id,
-            request.name,
-            request.amount,
-            request.due_day,
-            category_id=request.category_id,
-            notes=request.notes,
-            frequency=request.frequency,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            is_active=request.is_active
-        )
-    except ValueError as error:
-        raise bad_request(str(error)) from error
-    return SuccessResponse()
-
-
-@router.post("/bills/{bill_id}/cancel", response_model=SuccessResponse, response_model_by_alias=True)
-def cancel_shared_bill_route(bill_id: int, vault: VaultContext = Depends(get_authenticated_vault)):
-    require_shared_bill(
-        bill_id,
-        int_vault_id(vault)
-    )
-    cancel_shared_bill(bill_id)
-    return SuccessResponse()
-
-
-@router.post("/bills/{bill_id}/duplicate", response_model=SuccessResponse, response_model_by_alias=True)
-def duplicate_shared_bill_route(bill_id: int, vault: VaultContext = Depends(get_authenticated_vault)):
-    require_shared_bill(
-        bill_id,
-        int_vault_id(vault)
-    )
-    duplicate_shared_bill(bill_id)
-    return SuccessResponse()
-
-
 @router.post("/bills/instances/{instance_id}/skip", response_model=SuccessResponse, response_model_by_alias=True)
 def skip_shared_bill_instance_route(instance_id: int, vault: VaultContext = Depends(get_authenticated_vault)):
     require_shared_bill_instance(
@@ -682,19 +564,6 @@ def mark_shared_settlement_route(
             payment_method=request.payment_method,
             notes=request.notes,
         )
-    except ValueError as error:
-        raise bad_request(str(error)) from error
-    return SuccessResponse()
-
-
-@router.post("/bills/cycles/{cycle_id}/close", response_model=SuccessResponse, response_model_by_alias=True)
-def close_shared_bill_cycle_route(cycle_id: int, vault: VaultContext = Depends(get_authenticated_vault)):
-    require_shared_bill_cycle(
-        cycle_id,
-        int_vault_id(vault)
-    )
-    try:
-        close_cycle(cycle_id)
     except ValueError as error:
         raise bad_request(str(error)) from error
     return SuccessResponse()
