@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import threading
 
 from db.core import (
     EXPENSE,
@@ -14,6 +15,47 @@ from db.financial_cycles import (
 )
 
 
+
+_planning_schema_ready = False
+_planning_schema_lock = threading.Lock()
+
+
+def ensure_planning_schema_with_cursor(cursor) -> None:
+    """Ensure planning schema has required columns in an idempotent, PostgreSQL-native way."""
+    statements = [
+        "ALTER TABLE obligation_status ADD COLUMN IF NOT EXISTS paid_date TEXT",
+        "ALTER TABLE income_status ADD COLUMN IF NOT EXISTS paid_date TEXT",
+    ]
+    for statement in statements:
+        cursor.execute(statement, capture_lastrowid=False)
+
+
+def ensure_planning_schema() -> None:
+    """Idempotently ensure planning schema is migrated once per process."""
+    global _planning_schema_ready
+    if _planning_schema_ready:
+        return
+
+    with _planning_schema_lock:
+        if _planning_schema_ready:
+            return
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            ensure_planning_schema_with_cursor(cursor)
+            conn.commit()
+            _planning_schema_ready = True
+        finally:
+            conn.close()
+
+
+def reset_planning_schema_guard() -> None:
+    """Reset the initialization guard (used for testing idempotency)."""
+    global _planning_schema_ready
+    with _planning_schema_lock:
+        _planning_schema_ready = False
+
+
 def add_commitment(
     vault_id,
     name,
@@ -22,6 +64,7 @@ def add_commitment(
     account_id
 ):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
         existing = conn.execute(
@@ -78,6 +121,7 @@ def add_commitment(
 @cache_data(ttl=60)
 def get_commitments(vault_id):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
 
@@ -114,6 +158,7 @@ def delete_commitment(
     commitment_id
 ):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -167,6 +212,7 @@ def update_commitment(
     account_id
 ):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
         commitment = conn.execute(
@@ -234,6 +280,7 @@ def update_commitment(
 @cache_data(ttl=60)
 def get_total_commitments(vault_id):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
 
@@ -258,6 +305,7 @@ def get_obligation_status(
     month,
     year
 ):
+    ensure_planning_schema()
     conn = get_connection()
     try:
 
@@ -441,6 +489,7 @@ def save_obligation_status(
     notes="",
     paid_date=None
 ):
+    ensure_planning_schema()
     conn = get_connection()
 
     try:
@@ -482,6 +531,7 @@ def get_income_status(
     year
 ):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
 
@@ -515,6 +565,7 @@ def get_income_status(
 @cache_data(ttl=60)
 def get_planning_activity_statuses(vault_id, month, year):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
 
@@ -733,6 +784,7 @@ def save_income_status(
     paid_date=None
 ):
 
+    ensure_planning_schema()
     conn = get_connection()
 
     try:
@@ -803,6 +855,7 @@ def get_next_month(month, year):
 @cache_data(ttl=60)
 def get_monthly_planning_totals(vault_id, month, year):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
 
@@ -878,6 +931,7 @@ def get_monthly_planning_totals(vault_id, month, year):
 @cache_data(ttl=60)
 def get_cycle_planning_summary(vault_id, month, year, start_date, end_date):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
         row = conn.execute(
@@ -1209,6 +1263,7 @@ def finalize_month(
     updated_items
 ):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -1365,6 +1420,7 @@ def add_income_template(
     account_id
 ):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
 
@@ -1405,6 +1461,7 @@ def add_income_template(
 @cache_data(ttl=60)
 def get_income_templates(vault_id):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
 
@@ -1445,6 +1502,7 @@ def update_income_template(
     account_id
 ):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
 
@@ -1483,6 +1541,7 @@ def delete_income_template(
     template_id
 ):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -1532,6 +1591,7 @@ def get_total_income_templates(
     vault_id
 ):
 
+    ensure_planning_schema()
     conn = get_connection()
     try:
 

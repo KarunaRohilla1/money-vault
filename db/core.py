@@ -101,11 +101,13 @@ def migrate_database():
         from capture.models import ensure_capture_schema_with_cursor
         from db.settlements import ensure_settlements_schema_with_cursor
         from db.identity import ensure_identity_schema_with_cursor
+        from db.planning import ensure_planning_schema_with_cursor
 
         ensure_wishlist_schema_with_cursor(cursor)
         ensure_capture_schema_with_cursor(cursor)
         ensure_settlements_schema_with_cursor(cursor)
         ensure_identity_schema_with_cursor(cursor)
+        ensure_planning_schema_with_cursor(cursor)
 
         cursor.execute("""
         INSERT INTO wishlist_categories (vault_id, name)
