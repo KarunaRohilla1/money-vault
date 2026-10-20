@@ -266,7 +266,8 @@ def get_obligation_status(
             SELECT
                 actual_amount,
                 status,
-                notes
+                notes,
+                paid_date
             FROM obligation_status
             WHERE commitment_id = ?
             AND month = ?
@@ -292,7 +293,8 @@ def save_obligation_status_with_cursor(
     year,
     actual_amount,
     status,
-    notes=""
+    notes="",
+    paid_date=None
 ):
 
     commitment = cursor.execute(
@@ -344,16 +346,18 @@ def save_obligation_status_with_cursor(
             else commitment[3]
         )
 
+        tx_date = paid_date or get_planning_transaction_date(
+            year,
+            month,
+            commitment[4]
+        )
+
         transaction_id = upsert_linked_transaction(
             cursor,
             transaction_id,
             commitment[1],
             commitment[5],
-            get_planning_transaction_date(
-                year,
-                month,
-                commitment[4]
-            ),
+            tx_date,
             amount,
             EXPENSE,
             notes or f"Planning commitment: {commitment[2]}"
@@ -378,7 +382,8 @@ def save_obligation_status_with_cursor(
             actual_amount = ?,
             status = ?,
             notes = ?,
-            transaction_id = ?
+            transaction_id = ?,
+            paid_date = ?
         WHERE commitment_id = ?
         AND month = ?
         AND year = ?
@@ -388,6 +393,7 @@ def save_obligation_status_with_cursor(
             status,
             notes,
             transaction_id,
+            paid_date if status == "PAID" else None,
             commitment_id,
             month,
             year
@@ -405,10 +411,11 @@ def save_obligation_status_with_cursor(
             actual_amount,
             status,
             notes,
-            transaction_id
+            transaction_id,
+            paid_date
 
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 commitment_id,
@@ -417,7 +424,8 @@ def save_obligation_status_with_cursor(
                 actual_amount,
                 status,
                 notes,
-                transaction_id
+                transaction_id,
+                paid_date if status == "PAID" else None
             )
             ,
             capture_lastrowid=False
@@ -430,7 +438,8 @@ def save_obligation_status(
     year,
     actual_amount,
     status,
-    notes=""
+    notes="",
+    paid_date=None
 ):
     conn = get_connection()
 
@@ -443,7 +452,8 @@ def save_obligation_status(
             year,
             actual_amount,
             status,
-            notes
+            notes,
+            paid_date
         )
 
         conn.commit()
@@ -480,7 +490,8 @@ def get_income_status(
             SELECT
                 actual_amount,
                 status,
-                notes
+                notes,
+                paid_date
 
             FROM income_status
 
@@ -514,7 +525,8 @@ def get_planning_activity_statuses(vault_id, month, year):
                 i.id,
                 s.actual_amount,
                 COALESCE(s.status, 'PENDING'),
-                s.notes
+                s.notes,
+                s.paid_date
             FROM income_templates i
             LEFT JOIN income_status s
                 ON s.income_template_id = i.id
@@ -530,7 +542,8 @@ def get_planning_activity_statuses(vault_id, month, year):
                 c.id,
                 s.actual_amount,
                 COALESCE(s.status, 'PENDING'),
-                s.notes
+                s.notes,
+                s.paid_date
             FROM commitments c
             LEFT JOIN obligation_status s
                 ON s.commitment_id = c.id
@@ -554,7 +567,8 @@ def get_planning_activity_statuses(vault_id, month, year):
             (row[0], row[1]): (
                 row[2],
                 row[3],
-                row[4]
+                row[4],
+                row[5] if len(row) > 5 else None
             )
             for row in rows
         }
@@ -569,7 +583,8 @@ def save_income_status_with_cursor(
     year,
     actual_amount,
     status,
-    notes=""
+    notes="",
+    paid_date=None
 ):
 
     template = cursor.execute(
@@ -621,16 +636,18 @@ def save_income_status_with_cursor(
             else template[3]
         )
 
+        tx_date = paid_date or get_planning_transaction_date(
+            year,
+            month,
+            template[4]
+        )
+
         transaction_id = upsert_linked_transaction(
             cursor,
             transaction_id,
             template[1],
             template[5],
-            get_planning_transaction_date(
-                year,
-                month,
-                template[4]
-            ),
+            tx_date,
             amount,
             INCOME,
             notes or f"Planning income: {template[2]}"
@@ -655,7 +672,8 @@ def save_income_status_with_cursor(
             actual_amount = ?,
             status = ?,
             notes = ?,
-            transaction_id = ?
+            transaction_id = ?,
+            paid_date = ?
         WHERE income_template_id = ?
         AND month = ?
         AND year = ?
@@ -665,6 +683,7 @@ def save_income_status_with_cursor(
             status,
             notes,
             transaction_id,
+            paid_date if status == "RECEIVED" else None,
             income_template_id,
             month,
             year
@@ -683,11 +702,12 @@ def save_income_status_with_cursor(
             actual_amount,
             status,
             notes,
-            transaction_id
+            transaction_id,
+            paid_date
 
             )
 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 income_template_id,
@@ -696,7 +716,8 @@ def save_income_status_with_cursor(
                 actual_amount,
                 status,
                 notes,
-                transaction_id
+                transaction_id,
+                paid_date if status == "RECEIVED" else None
             ),
             capture_lastrowid=False
         )
@@ -708,7 +729,8 @@ def save_income_status(
     year,
     actual_amount,
     status,
-    notes=""
+    notes="",
+    paid_date=None
 ):
 
     conn = get_connection()
@@ -722,7 +744,8 @@ def save_income_status(
             year,
             actual_amount,
             status,
-            notes
+            notes,
+            paid_date
         )
 
         conn.commit()

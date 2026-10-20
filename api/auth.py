@@ -12,11 +12,16 @@ from api.schemas import (
     LoginResponse,
     PinChangeRequest,
     PinSetRequest,
+    PrimarySharedVaultItem,
+    PrimarySharedVaultResponse,
     ProfileUpdateRequest,
     RecoverPinRequest,
     RecoveryCodeResponse,
     RegisterRequest,
     SessionResponse,
+    SetPrimarySharedVaultRequest,
+    SetSharedVaultDashboardVisibilityRequest,
+    SetSharedVaultSafeToSpendRequest,
     SharedVaultActivationRequest,
     SharedVaultDetailResponse,
     SharedVaultMemberResponse,
@@ -33,10 +38,12 @@ from db.identity import (
     add_vault_member,
     authenticate_user,
     change_profile_pin,
+    clear_primary_shared_vault_for_personal,
     create_shared_vault_for_user,
     delete_shared_vault_for_user,
     get_membership,
     get_personal_vault,
+    get_primary_shared_vault_for_personal,
     get_profile,
     invite_code_for_shared_vault,
     issue_recovery_code,
@@ -50,9 +57,15 @@ from db.identity import (
     rename_shared_vault_for_user,
     require_shared_membership,
     set_active_vault,
+    is_shared_vault_included_in_safe_to_spend,
+    is_shared_vault_shown_on_dashboard,
+    set_primary_shared_vault_for_personal,
     set_profile_pin,
+    set_shared_vault_included_in_safe_to_spend,
+    set_shared_vault_shown_on_dashboard,
     update_display_name
 )
+from db.postgres import run_with_deadlock_retry
 from db.vaults import get_connected_shared_vaults, get_vault_by_id
 
 
@@ -132,6 +145,20 @@ def authenticated_personal_vault(active_context):
     authenticated = vault_from_row(row)
 
     if not authenticated or authenticated.vault_type != "Individual":
+        if active_context.user_id:
+            try:
+                personal = get_personal_vault(active_context.user_id)
+                if personal:
+                    return AuthenticatedVault(
+                        id=str(personal.id),
+                        name=str(personal.name),
+                        is_admin=True,
+                        vault_type="Individual",
+                        role="owner"
+                    )
+            except Exception:
+                pass
+
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -400,33 +427,57 @@ def change_pin(request: PinChangeRequest, vault: VaultContext = Depends(get_auth
 
 @router.get("/vaults/shared", response_model=list[SharedVaultSummaryResponse], response_model_by_alias=True)
 def shared_vaults(vault: VaultContext = Depends(get_authenticated_vault)):
+    personal_id = None
+    if vault.authenticated_vault_id:
+        personal_id = int(vault.authenticated_vault_id)
+    elif getattr(vault, "vault_type", None) == "Individual":
+        personal_id = int(vault.id)
+
+    def preference_flags(shared_vault_id: int) -> tuple[bool, bool]:
+        if personal_id is None:
+            return True, True
+        return (
+            is_shared_vault_included_in_safe_to_spend(personal_id, shared_vault_id),
+            is_shared_vault_shown_on_dashboard(personal_id, shared_vault_id)
+        )
+
     if vault.user_id:
         user_memberships = list_shared_memberships_for_user(vault.user_id)
         if user_memberships:
-            return [
-                SharedVaultSummaryResponse(
-                    id=int(item.id),
-                    name=item.name,
-                    isAdmin=item.role == OWNER_ROLE,
-                    vaultType="Shared",
-                    role=item.role,
-                    memberCount=item.member_count,
+            summaries = []
+            for item in user_memberships:
+                included, shown = preference_flags(int(item.id))
+                summaries.append(
+                    SharedVaultSummaryResponse(
+                        id=int(item.id),
+                        name=item.name,
+                        isAdmin=item.role == OWNER_ROLE,
+                        vaultType="Shared",
+                        role=item.role,
+                        memberCount=item.member_count,
+                        includeInSafeToSpend=included,
+                        showOnDashboard=shown,
+                    )
                 )
-                for item in user_memberships
-            ]
+            return summaries
 
     authenticated = authenticated_personal_vault(vault)
-    return [
-        SharedVaultSummaryResponse(
-            id=int(shared_vault.id),
-            name=shared_vault.name,
-            isAdmin=False,
-            vaultType="Shared",
-            role=MEMBER_ROLE,
-            memberCount=0,
+    summaries = []
+    for shared_vault in visible_connected_shared_vaults(authenticated):
+        included, shown = preference_flags(int(shared_vault.id))
+        summaries.append(
+            SharedVaultSummaryResponse(
+                id=int(shared_vault.id),
+                name=shared_vault.name,
+                isAdmin=False,
+                vaultType="Shared",
+                role=MEMBER_ROLE,
+                memberCount=0,
+                includeInSafeToSpend=included,
+                showOnDashboard=shown,
+            )
         )
-        for shared_vault in visible_connected_shared_vaults(authenticated)
-    ]
+    return summaries
 
 
 @router.get("/vaults/shared/{shared_vault_id}", response_model=SharedVaultDetailResponse, response_model_by_alias=True)
@@ -635,3 +686,128 @@ def activate_personal_vault(
         displayName=extra.get("displayName"),
         userId=extra.get("userId")
     )
+
+
+@router.get("/vaults/personal/primary-shared-vault", response_model=PrimarySharedVaultResponse, response_model_by_alias=True)
+def get_primary_shared_vault(
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    authenticated = authenticated_personal_vault(vault)
+    shared = get_primary_shared_vault_for_personal(int(authenticated.id), user_id=vault.user_id)
+    if shared:
+        return PrimarySharedVaultResponse(
+            configured=True,
+            shared_vault=PrimarySharedVaultItem(id=shared["id"], name=shared["name"])
+        )
+    return PrimarySharedVaultResponse(configured=False, shared_vault=None)
+
+
+@router.put("/vaults/personal/primary-shared-vault", response_model=PrimarySharedVaultResponse, response_model_by_alias=True)
+def set_primary_shared_vault(
+    request: SetPrimarySharedVaultRequest,
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    authenticated = authenticated_personal_vault(vault)
+    try:
+        shared = set_primary_shared_vault_for_personal(
+            int(authenticated.id),
+            request.shared_vault_id,
+            user_id=vault.user_id
+        )
+    except ValueError as exc:
+        raise bad_request(str(exc)) from exc
+
+    return PrimarySharedVaultResponse(
+        configured=True,
+        shared_vault=PrimarySharedVaultItem(id=shared["id"], name=shared["name"])
+    )
+
+
+@router.put(
+    "/vaults/personal/shared-vaults/{shared_vault_id}/safe-to-spend",
+    response_model=SharedVaultSummaryResponse,
+    response_model_by_alias=True
+)
+def set_shared_vault_safe_to_spend_inclusion(
+    shared_vault_id: int,
+    request: SetSharedVaultSafeToSpendRequest,
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    authenticated = authenticated_personal_vault(vault)
+
+    def apply_inclusion():
+        included = set_shared_vault_included_in_safe_to_spend(
+            int(authenticated.id),
+            shared_vault_id,
+            request.include_in_safe_to_spend,
+            user_id=vault.user_id
+        )
+        memberships = list_shared_memberships_for_user(vault.user_id) if vault.user_id else []
+        return included, memberships
+
+    try:
+        included, memberships = run_with_deadlock_retry(apply_inclusion)
+    except ValueError as exc:
+        raise bad_request(str(exc)) from exc
+
+    match = next((item for item in memberships if int(item.id) == int(shared_vault_id)), None)
+    return SharedVaultSummaryResponse(
+        id=shared_vault_id,
+        name=match.name if match else "",
+        isAdmin=(match.role == OWNER_ROLE) if match else False,
+        vaultType="Shared",
+        role=match.role if match else MEMBER_ROLE,
+        memberCount=match.member_count if match else 0,
+        includeInSafeToSpend=included,
+        showOnDashboard=is_shared_vault_shown_on_dashboard(int(authenticated.id), shared_vault_id),
+    )
+
+
+@router.put(
+    "/vaults/personal/shared-vaults/{shared_vault_id}/dashboard",
+    response_model=SharedVaultSummaryResponse,
+    response_model_by_alias=True
+)
+def set_shared_vault_dashboard_visibility(
+    shared_vault_id: int,
+    request: SetSharedVaultDashboardVisibilityRequest,
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    authenticated = authenticated_personal_vault(vault)
+
+    def apply_visibility():
+        visible = set_shared_vault_shown_on_dashboard(
+            int(authenticated.id),
+            shared_vault_id,
+            request.show_on_dashboard,
+            user_id=vault.user_id
+        )
+        memberships = list_shared_memberships_for_user(vault.user_id) if vault.user_id else []
+        return visible, memberships
+
+    try:
+        visible, memberships = run_with_deadlock_retry(apply_visibility)
+    except ValueError as exc:
+        raise bad_request(str(exc)) from exc
+
+    match = next((item for item in memberships if int(item.id) == int(shared_vault_id)), None)
+    return SharedVaultSummaryResponse(
+        id=shared_vault_id,
+        name=match.name if match else "",
+        isAdmin=(match.role == OWNER_ROLE) if match else False,
+        vaultType="Shared",
+        role=match.role if match else MEMBER_ROLE,
+        memberCount=match.member_count if match else 0,
+        includeInSafeToSpend=is_shared_vault_included_in_safe_to_spend(int(authenticated.id), shared_vault_id),
+        showOnDashboard=visible,
+    )
+
+
+@router.delete("/vaults/personal/primary-shared-vault", response_model=PrimarySharedVaultResponse, response_model_by_alias=True)
+def clear_primary_shared_vault(
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    authenticated = authenticated_personal_vault(vault)
+    clear_primary_shared_vault_for_personal(int(authenticated.id))
+    return PrimarySharedVaultResponse(configured=False, shared_vault=None)
+

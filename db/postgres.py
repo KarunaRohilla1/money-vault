@@ -260,6 +260,24 @@ def is_read_only_query(sql):
     )
 
 
+def is_deadlock_error(error):
+    if errors is None:
+        return False
+    return isinstance(error, errors.DeadlockDetected)
+
+
+def run_with_deadlock_retry(operation, attempts=3):
+    last_error = None
+    for _ in range(attempts):
+        try:
+            return operation()
+        except Exception as error:
+            if not is_deadlock_error(error):
+                raise
+            last_error = error
+    raise last_error
+
+
 class PostgresCursor:
     def __init__(self, connection):
         if hasattr(
@@ -347,11 +365,21 @@ class PostgresCursor:
             cursor.execute(
                 "SAVEPOINT money_vault_lastrowid"
             )
-            cursor.execute(
-                "SELECT pg_get_serial_sequence(%s, 'id')",
-                (table_name,)
-            )
-            sequence = cursor.fetchone()[0]
+            try:
+                cursor.execute(
+                    "SELECT pg_get_serial_sequence(%s, 'id')",
+                    (table_name,)
+                )
+                sequence = cursor.fetchone()[0]
+            except errors.UndefinedColumn:
+                # Composite-key tables such as personal_shared_vault_preferences have no id serial.
+                cursor.execute(
+                    "ROLLBACK TO SAVEPOINT money_vault_lastrowid"
+                )
+                cursor.execute(
+                    "RELEASE SAVEPOINT money_vault_lastrowid"
+                )
+                return
 
             if not sequence:
                 cursor.execute(

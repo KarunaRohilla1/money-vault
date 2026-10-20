@@ -331,7 +331,7 @@ def test_shared_settlements_exposes_legacy_settlement_accounts(monkeypatch):
         lambda vault_id: SimpleNamespace(start_iso="2026-07-01", end_iso="2026-07-31")
     )
 
-    def fake_settlement_summary(vault_id, start_date, end_date):
+    def fake_settlement_summary(vault_id, start_date, end_date, shared_vault_id=None):
         observed.update(
             {
                 "end_date": end_date,
@@ -339,6 +339,8 @@ def test_shared_settlements_exposes_legacy_settlement_accounts(monkeypatch):
                 "vault_id": vault_id
             }
         )
+        if shared_vault_id is not None:
+            observed["shared_vault_id"] = shared_vault_id
         return {
             "amount": 1200,
             "direction": "payable",

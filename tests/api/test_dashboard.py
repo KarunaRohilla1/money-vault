@@ -55,6 +55,8 @@ def dashboard_payload():
             "total_assets": Decimal("90000.00"),
             "total_liabilities": Decimal("1200.00"),
             "actual_savings": Decimal("16600.00"),
+            "net_savings_this_cycle": Decimal("16600.00"),
+            "savings_goal_remaining": Decimal("12610.50"),
             "remaining_commitments": Decimal("17800.00"),
             "monthly_savings_goal": Decimal("12610.50"),
             "expenses": Decimal("28400.00"),
@@ -182,6 +184,8 @@ def test_dashboard_adapter_serializes_decimal_and_dates(monkeypatch):
     body = response.model_dump(by_alias=True)
 
     assert body["data"]["safeToSpend"] == 38240.0
+    assert body["data"]["netSavingsThisCycle"] == 16600.0
+    assert body["data"]["actualSavings"] == 16600.0
     breakdown = body["data"]["safeToSpendBreakdown"]
     assert breakdown["total"] == body["data"]["safeToSpend"]
     assert breakdown["items"] == [
@@ -189,7 +193,7 @@ def test_dashboard_adapter_serializes_decimal_and_dates(monkeypatch):
         {"key": "you_owe", "label": "You Owe", "amount": 1250.0, "operation": "subtract"},
         {"key": "remaining_commitments", "label": "Remaining Commitments", "amount": 17800.0, "operation": "subtract"},
         {"key": "credit_card_due", "label": "Credit Card Due", "amount": 12400.0, "operation": "subtract"},
-        {"key": "savings_goal", "label": "Savings Goal", "amount": 12610.5, "operation": "subtract"}
+        {"key": "savings_goal", "label": "Remaining Savings Goal", "amount": 12610.5, "operation": "subtract"}
     ]
     assert body["data"]["recentActivity"][0]["date"] == "2026-07-12"
     assert body["data"]["recentActivity"][0]["direction"] == "debit"
@@ -197,6 +201,35 @@ def test_dashboard_adapter_serializes_decimal_and_dates(monkeypatch):
     assert body["data"]["spendingByCategory"][0]["categoryId"] == 11
     assert body["data"]["spendingByCategory"][0]["key"] == "category:11"
     assert body["data"]["settlement"]["items"][0]["created_at"] == "2026-07-12T08:30:00"
+
+
+def test_dashboard_safe_to_spend_breakdown_adds_amount_owed(monkeypatch):
+    from api.dashboard import adapt_dashboard_response
+    from api.schemas import VaultContext
+
+    payload = dashboard_payload()
+    payload["summary"] = {
+        **payload["summary"],
+        "safe_to_spend": Decimal("39740.00"),
+        "settlement_summary": {
+            **payload["summary"]["settlement_summary"],
+            "label": "Owed to You:",
+            "amount": Decimal("250.00"),
+            "direction": "receivable",
+            "receivable": Decimal("250.00"),
+            "payable": Decimal("0.00"),
+            "net": Decimal("250.00"),
+        }
+    }
+
+    response = adapt_dashboard_response(
+        VaultContext(id="7", name="Karuna", isAdmin=True, vaultType="Individual"),
+        payload,
+        cycle()
+    )
+    breakdown = response.model_dump(by_alias=True)["data"]["safeToSpendBreakdown"]
+    assert breakdown["items"][1] == {"key": "you_owe", "label": "You Owe", "amount": 0.0, "operation": "subtract"}
+    assert breakdown["items"][2] == {"key": "you_are_owed", "label": "You Are Owed", "amount": 250.0, "operation": "add"}
 
 
 def test_dashboard_safe_to_spend_breakdown_clamps_negative_total(monkeypatch):
@@ -210,6 +243,7 @@ def test_dashboard_safe_to_spend_breakdown_clamps_negative_total(monkeypatch):
         "remaining_commitments": Decimal("300.00"),
         "credit_card_due": Decimal("200.00"),
         "monthly_savings_goal": Decimal("50.00"),
+        "savings_goal_remaining": Decimal("50.00"),
         "safe_to_spend": Decimal("0.00"),
         "settlement_summary": {
             **payload["summary"]["settlement_summary"],

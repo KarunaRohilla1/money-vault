@@ -11,6 +11,9 @@ def build_client(monkeypatch):
 
     from api.main import create_app
 
+    monkeypatch.setattr("api.settings.get_show_shared_balances_on_dashboard", lambda _vault_id: True)
+    monkeypatch.setattr("api.settings.set_show_shared_balances_on_dashboard", lambda *_args, **_kwargs: True)
+
     return TestClient(create_app())
 
 

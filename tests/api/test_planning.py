@@ -172,3 +172,57 @@ def test_build_activity_month_crossing_cycle():
     act_oct = build_activity("commitment", row_oct, None, cycle)
     assert act_oct.due_date == "2026-10-05"
 
+
+def test_set_commitment_status_with_paid_date(monkeypatch):
+    client = build_client(monkeypatch)
+    headers = auth_header(monkeypatch)
+
+    saved_calls = []
+
+    def mock_require_commitment(commitment_id, vault_id):
+        pass
+
+    def mock_save_obligation_status(commitment_id, month, year, actual_amount, status, notes="", paid_date=None):
+        saved_calls.append({
+            "commitment_id": commitment_id,
+            "month": month,
+            "year": year,
+            "actual_amount": actual_amount,
+            "status": status,
+            "notes": notes,
+            "paid_date": paid_date,
+        })
+
+    monkeypatch.setattr("api.planning.require_commitment", mock_require_commitment)
+    monkeypatch.setattr("api.planning.save_obligation_status", mock_save_obligation_status)
+
+    res = client.post(
+        "/api/planning/commitments/42/status",
+        headers=headers,
+        json={
+            "actualAmount": 15000.0,
+            "month": 10,
+            "notes": "Paid early via UPI",
+            "paidDate": "2026-10-14",
+            "status": "PAID",
+            "year": 2026,
+        }
+    )
+    assert res.status_code == 200
+    assert len(saved_calls) == 1
+    assert saved_calls[0]["commitment_id"] == 42
+    assert saved_calls[0]["actual_amount"] == 15000.0
+    assert saved_calls[0]["paid_date"] == "2026-10-14"
+    assert saved_calls[0]["status"] == "PAID"
+
+
+def test_adapt_status_includes_paid_date():
+    from api.planning import adapt_status
+
+    status_row = (12000.0, "PAID", "All good", "2026-10-15")
+    result = adapt_status(status_row)
+    assert result.actual_amount == 12000.0
+    assert result.status == "PAID"
+    assert result.notes == "All good"
+    assert result.paid_date == "2026-10-15"
+

@@ -307,11 +307,19 @@ def settlement_summary_with_accounts(vault_id, shared_vault_id=None, start_date=
         cycle_start = cycle.start_iso
         cycle_end = cycle.end_iso
 
-    summary = get_settlement_summary(
-        vault_id,
-        cycle_start,
-        cycle_end
-    )
+    if shared_vault_id is not None:
+        summary = get_settlement_summary(
+            vault_id,
+            cycle_start,
+            cycle_end,
+            shared_vault_id=shared_vault_id
+        )
+    else:
+        summary = get_settlement_summary(
+            vault_id,
+            cycle_start,
+            cycle_end
+        )
 
     items = []
     for item in summary["items"]:
@@ -377,8 +385,9 @@ def shared_dashboard(
     shared_vault_id: Optional[int] = Query(default=None, alias="sharedVaultId"),
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
+    personal_vault_id = current_personal_vault_id(vault)
     selected_id = resolve_shared_vault_id(
-        int_vault_id(vault),
+        personal_vault_id,
         shared_vault_id
     )
     return SharedPageResponse(
@@ -397,9 +406,9 @@ def shared_expenses(
     paid_by_vault_id: Optional[int] = Query(default=None, alias="paidByVaultId"),
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
-    vault_id = int_vault_id(vault)
+    personal_vault_id = current_personal_vault_id(vault)
     selected_id = resolve_shared_vault_id(
-        vault_id,
+        personal_vault_id,
         shared_vault_id
     )
     start_date, end_date = cycle_bounds(selected_id)
@@ -409,7 +418,6 @@ def shared_expenses(
             selected_id
         )
 
-    personal_vault_id = current_personal_vault_id(vault)
     return SharedPageResponse(
         data=get_shared_expenses_page_data(
             selected_id,
@@ -429,9 +437,9 @@ def shared_settlements(
 ):
     personal_vault_id = current_personal_vault_id(vault)
 
-    if vault.vault_type == "Shared":
+    if shared_vault_id is not None or vault.vault_type == "Shared":
         selected_id = resolve_shared_vault_id(
-            int_vault_id(vault),
+            personal_vault_id,
             shared_vault_id
         )
         cycle = get_current_cycle(selected_id)
@@ -459,14 +467,15 @@ def shared_settlement_history(
 ):
     from db.settlements import get_settlement_history
 
+    personal_vault_id = current_personal_vault_id(vault)
     selected_id = resolve_shared_vault_id(
-        int_vault_id(vault),
+        personal_vault_id,
         shared_vault_id
     )
     return SharedPageResponse(
         data=get_settlement_history(
             selected_id,
-            current_personal_vault_id(vault),
+            personal_vault_id,
             direction=direction or "all",
             limit=limit,
             offset=offset,
@@ -481,8 +490,9 @@ def shared_bills(
     month: Optional[int] = None,
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
+    personal_vault_id = current_personal_vault_id(vault)
     selected_id = resolve_shared_vault_id(
-        int_vault_id(vault),
+        personal_vault_id,
         shared_vault_id
     )
     return SharedPageResponse(

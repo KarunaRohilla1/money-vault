@@ -175,13 +175,15 @@ def adapt_status(status):
         return PlanningStatusResponse(
             actualAmount=None,
             status="PENDING",
-            notes=None
+            notes=None,
+            paidDate=None
         )
 
     return PlanningStatusResponse(
         actualAmount=number(status[0]) if status[0] is not None else None,
         status=status[1],
-        notes=status[2]
+        notes=status[2],
+        paidDate=status[3] if len(status) > 3 else None
     )
 
 
@@ -532,7 +534,8 @@ def set_commitment_status(
         request.year,
         request.actual_amount,
         status,
-        request.notes
+        request.notes,
+        request.paid_date
     )
     return SuccessResponse()
 
@@ -609,7 +612,8 @@ def set_income_status(
         request.year,
         request.actual_amount,
         status,
-        request.notes
+        request.notes,
+        request.paid_date
     )
     return SuccessResponse()
 

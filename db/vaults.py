@@ -652,6 +652,15 @@ def delete_vault(vault_id):
 
         cursor.execute(
             """
+            UPDATE vaults
+            SET primary_shared_vault_id = NULL
+            WHERE primary_shared_vault_id = ?
+            """,
+            (vault_id,)
+        )
+
+        cursor.execute(
+            """
             DELETE FROM vaults
             WHERE id = ?
             """,
@@ -674,3 +683,44 @@ def delete_vault(vault_id):
 
     finally:
         conn.close()
+
+
+@cache_data(ttl=60)
+def get_primary_shared_vault_id(vault_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT primary_shared_vault_id
+            FROM vaults
+            WHERE id = ?
+            """,
+            (vault_id,)
+        ).fetchone()
+        return row[0] if row and row[0] is not None else None
+    finally:
+        conn.close()
+
+
+def set_primary_shared_vault_id(vault_id, shared_vault_id):
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            UPDATE vaults
+            SET primary_shared_vault_id = ?
+            WHERE id = ?
+            """,
+            (shared_vault_id, vault_id)
+        )
+        conn.commit()
+        clear_data_cache((
+            "vaults",
+            "dashboard",
+            "reports",
+            "shared_expenses",
+            "shared_bills"
+        ))
+    finally:
+        conn.close()
+

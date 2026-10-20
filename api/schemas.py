@@ -154,6 +154,19 @@ class SafeToSpendBreakdownResponse(BaseModel):
     total: float
 
 
+class SharedVaultBalanceCardResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    name: str
+    amount: float
+    direction: str
+    label: str
+    payable: float
+    receivable: float
+    show_on_dashboard: bool = Field(alias="showOnDashboard", default=True)
+
+
 class DashboardDataResponse(BaseModel):
     cycle: FinancialCycleResponse
     safe_to_spend: float = Field(alias="safeToSpend")
@@ -163,9 +176,17 @@ class DashboardDataResponse(BaseModel):
     remaining_commitments: float = Field(alias="remainingCommitments")
     credit_card_due: float = Field(alias="creditCardDue")
     settlement: SettlementResponse
+    show_shared_balances_on_dashboard: bool = Field(alias="showSharedBalancesOnDashboard", default=True)
+    shared_vault_balances: List[SharedVaultBalanceCardResponse] = Field(
+        alias="sharedVaultBalances",
+        default_factory=list
+    )
     recent_activity: List[RecentActivityItem] = Field(alias="recentActivity")
     spending_by_category: List[CategorySpendItem] = Field(alias="spendingByCategory")
     setup: SetupStatusResponse
+    net_savings_this_cycle: float = Field(alias="netSavingsThisCycle", default=0.0)
+    actual_savings: float = Field(alias="actualSavings", default=0.0)
+    savings_goal_remaining: float = Field(alias="savingsGoalRemaining", default=0.0)
     summary: Dict[str, Any]
 
 
@@ -404,6 +425,7 @@ class PlanningStatusResponse(BaseModel):
     actual_amount: Optional[float] = Field(default=None, alias="actualAmount")
     status: str
     notes: Optional[str] = None
+    paid_date: Optional[str] = Field(default=None, alias="paidDate")
 
 
 class CommitmentResponse(BaseModel):
@@ -525,6 +547,7 @@ class PlanningStatusRequest(BaseModel):
     actual_amount: Optional[float] = Field(default=None, alias="actualAmount")
     month: int = Field(ge=1, le=12)
     notes: str = ""
+    paid_date: Optional[str] = Field(default=None, alias="paidDate")
     status: str = Field(min_length=1)
     year: int = Field(ge=2000, le=2100)
 
@@ -573,6 +596,9 @@ class WishlistItemResponse(BaseModel):
     purchase_link: str = Field(default="", alias="purchaseLink")
     saved_amount: float = Field(default=0, alias="savedAmount")
     target_date: Optional[str] = Field(default=None, alias="targetDate")
+    status: str = "ACTIVE"
+    purchased_amount: Optional[float] = Field(default=None, alias="purchasedAmount")
+    purchased_date: Optional[str] = Field(default=None, alias="purchasedDate")
 
 
 class WishlistSummaryResponse(BaseModel):
@@ -580,6 +606,8 @@ class WishlistSummaryResponse(BaseModel):
     total_cost: float = Field(alias="totalCost")
     total_saved: float = Field(default=0, alias="totalSaved")
     progress: int = 0
+    completed_items: int = Field(default=0, alias="completedItems")
+    completed_spent: float = Field(default=0, alias="completedSpent")
 
 
 class WishlistResponse(BaseModel):
@@ -601,6 +629,11 @@ class WishlistItemRequest(BaseModel):
     purchase_link: str = Field(default="", alias="purchaseLink")
     saved_amount: float = Field(default=0, alias="savedAmount", ge=0)
     target_date: Optional[str] = Field(default=None, alias="targetDate")
+
+
+class CompleteWishlistItemRequest(BaseModel):
+    purchased_amount: Optional[float] = Field(default=None, alias="purchasedAmount", ge=0)
+    purchased_date: Optional[str] = Field(default=None, alias="purchasedDate")
 
 
 class ReportCycleOption(BaseModel):
@@ -814,6 +847,8 @@ class SharedVaultSummaryResponse(BaseModel):
     vault_type: str = Field(alias="vaultType")
     role: str
     member_count: int = Field(alias="memberCount")
+    include_in_safe_to_spend: bool = Field(alias="includeInSafeToSpend", default=True)
+    show_on_dashboard: bool = Field(alias="showOnDashboard", default=True)
 
 
 class SharedVaultMemberResponse(BaseModel):
@@ -844,11 +879,32 @@ class SharedVaultRenameRequest(BaseModel):
     vault_name: str = Field(alias="vaultName", min_length=1)
 
 
+class PrimarySharedVaultItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    name: str
+
+
+class PrimarySharedVaultResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    configured: bool
+    shared_vault: Optional[PrimarySharedVaultItem] = Field(default=None, alias="sharedVault")
+
+
+class SetPrimarySharedVaultRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    shared_vault_id: int = Field(alias="sharedVaultId")
+
+
 class SettingsResponse(BaseModel):
     current_vault: VaultSummaryResponse = Field(alias="currentVault")
     accessible_vaults: List[VaultSummaryResponse] = Field(alias="accessibleVaults")
     cycle_start_day: int = Field(alias="cycleStartDay")
     monthly_savings_goal: float = Field(alias="monthlySavingsGoal")
+    show_shared_balances_on_dashboard: bool = Field(alias="showSharedBalancesOnDashboard", default=True)
 
 
 class SessionResponse(BaseModel):
@@ -899,7 +955,23 @@ class SettingsUpdateRequest(BaseModel):
     vault_name: Optional[str] = Field(default=None, alias="vaultName")
     cycle_start_day: Optional[int] = Field(default=None, alias="cycleStartDay", ge=1, le=31)
     monthly_savings_goal: Optional[float] = Field(default=None, alias="monthlySavingsGoal", ge=0)
+    show_shared_balances_on_dashboard: Optional[bool] = Field(
+        default=None,
+        alias="showSharedBalancesOnDashboard"
+    )
     pin: Optional[str] = Field(default=None, min_length=1)
+
+
+class SetSharedVaultSafeToSpendRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    include_in_safe_to_spend: bool = Field(alias="includeInSafeToSpend")
+
+
+class SetSharedVaultDashboardVisibilityRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    show_on_dashboard: bool = Field(alias="showOnDashboard")
 
 
 class SharedBillPaymentRequest(BaseModel):

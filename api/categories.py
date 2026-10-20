@@ -22,8 +22,6 @@ router = APIRouter(prefix="/api/categories", tags=["categories"])
 
 
 def effective_category_vault_id(vault):
-    if vault.vault_type == "Shared" and vault.authenticated_vault_id:
-        return int(vault.authenticated_vault_id)
     return int_vault_id(vault)
 
 
@@ -49,9 +47,10 @@ def list_categories(vault: VaultContext = Depends(get_authenticated_vault)):
 
 @router.post("", response_model=SuccessResponse, response_model_by_alias=True)
 def create_category(request: CategoryCreateRequest, vault: VaultContext = Depends(get_authenticated_vault)):
+    vault_id = effective_category_vault_id(vault)
     try:
         add_category(
-            int_vault_id(vault),
+            vault_id,
             request.name,
             request.emoji,
             request.category_type
@@ -68,9 +67,10 @@ def update_category_route(
     request: CategoryUpdateRequest,
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
+    vault_id = effective_category_vault_id(vault)
     require_category(
         category_id,
-        int_vault_id(vault)
+        vault_id
     )
     try:
         update_category(
@@ -87,9 +87,10 @@ def update_category_route(
 
 @router.delete("/{category_id}", response_model=SuccessResponse, response_model_by_alias=True)
 def delete_category_route(category_id: int, vault: VaultContext = Depends(get_authenticated_vault)):
+    vault_id = effective_category_vault_id(vault)
     require_category(
         category_id,
-        int_vault_id(vault)
+        vault_id
     )
     if get_category_transaction_count(category_id) > 0:
         raise bad_request("Category has transactions and cannot be deleted.")

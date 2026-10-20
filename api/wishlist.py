@@ -11,6 +11,7 @@ from api.resources import (
     require_wishlist_item
 )
 from api.schemas import (
+    CompleteWishlistItemRequest,
     SuccessResponse,
     VaultContext,
     WishlistCategoryRequest,
@@ -24,12 +25,14 @@ from api.schemas import (
 from db.wishlist import (
     add_wishlist_category,
     add_wishlist_item,
+    complete_wishlist_item,
     delete_wishlist_category,
     delete_wishlist_item,
     get_wishlist_categories,
     get_wishlist_category,
     get_wishlist_items,
     get_wishlist_summary,
+    reopen_wishlist_item,
     reorder_wishlist_categories,
     update_wishlist_category,
     update_wishlist_item
@@ -75,7 +78,10 @@ def adapt_item(row):
         imageSource=row[12],
         createdAt=str(row[13]) if row[13] else None,
         categoryId=int(row[14]) if row[14] is not None else None,
-        progressPercent=progress
+        progressPercent=progress,
+        status=str(row[15]) if len(row) > 15 and row[15] else "ACTIVE",
+        purchasedAmount=number(row[16]) if len(row) > 16 and row[16] is not None else None,
+        purchasedDate=str(row[17]) if len(row) > 17 and row[17] else None
     )
 
 
@@ -85,6 +91,7 @@ def wishlist(
     category: Optional[str] = None,
     date_filter: str = Query(default="All Dates", alias="dateFilter"),
     search: Optional[str] = None,
+    status: Optional[str] = None,
     vault: VaultContext = Depends(get_authenticated_vault)
 ):
     vault_id = int_vault_id(vault)
@@ -101,14 +108,17 @@ def wishlist(
                 search=search,
                 account_id=account_id,
                 date_filter=date_filter,
-                category=category
+                category=category,
+                status=status
             )
         ],
         summary=WishlistSummaryResponse(
             totalItems=int(summary["total_items"]),
             totalCost=number(summary["total_cost"]),
             totalSaved=number(summary["total_saved"]),
-            progress=int(summary["progress"])
+            progress=int(summary["progress"]),
+            completedItems=int(summary.get("completed_items", 0)),
+            completedSpent=number(summary.get("completed_spent", 0))
         )
     )
 
@@ -255,4 +265,38 @@ def delete_item(item_id: int, vault: VaultContext = Depends(get_authenticated_va
         int_vault_id(vault)
     )
     delete_wishlist_item(item_id)
+    return SuccessResponse()
+
+
+@router.post("/items/{item_id}/complete", response_model=SuccessResponse, response_model_by_alias=True)
+def complete_item(
+    item_id: int,
+    request: Optional[CompleteWishlistItemRequest] = None,
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    vault_id = int_vault_id(vault)
+    require_wishlist_item(item_id, vault_id)
+    try:
+        complete_wishlist_item(
+            item_id,
+            vault_id,
+            purchased_amount=request.purchased_amount if request else None,
+            purchased_date=request.purchased_date if request else None
+        )
+    except ValueError as err:
+        raise bad_request(str(err)) from err
+    return SuccessResponse()
+
+
+@router.post("/items/{item_id}/reopen", response_model=SuccessResponse, response_model_by_alias=True)
+def reopen_item(
+    item_id: int,
+    vault: VaultContext = Depends(get_authenticated_vault)
+):
+    vault_id = int_vault_id(vault)
+    require_wishlist_item(item_id, vault_id)
+    try:
+        reopen_wishlist_item(item_id, vault_id)
+    except ValueError as err:
+        raise bad_request(str(err)) from err
     return SuccessResponse()

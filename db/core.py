@@ -115,6 +115,71 @@ def migrate_database():
         ON CONFLICT (vault_id, name) DO NOTHING
         """, capture_lastrowid=False)
 
+        try:
+            cursor.execute(
+                """
+                ALTER TABLE vaults
+                ADD COLUMN primary_shared_vault_id BIGINT REFERENCES vaults(id) ON DELETE SET NULL
+                """
+            )
+        except Exception:
+            pass
+
+        try:
+            cursor.execute(
+                """
+                ALTER TABLE vaults
+                ADD COLUMN show_shared_balances_on_dashboard BOOLEAN NOT NULL DEFAULT TRUE
+                """
+            )
+        except Exception:
+            pass
+
+        try:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS personal_shared_vault_preferences (
+                    personal_vault_id BIGINT NOT NULL,
+                    shared_vault_id BIGINT NOT NULL,
+                    include_in_safe_to_spend BOOLEAN NOT NULL DEFAULT TRUE,
+                    show_on_dashboard BOOLEAN NOT NULL DEFAULT TRUE,
+                    PRIMARY KEY (personal_vault_id, shared_vault_id)
+                )
+                """
+            )
+        except Exception:
+            pass
+
+        try:
+            cursor.execute(
+                """
+                ALTER TABLE personal_shared_vault_preferences
+                ADD COLUMN show_on_dashboard BOOLEAN NOT NULL DEFAULT TRUE
+                """
+            )
+        except Exception:
+            pass
+
+        try:
+            cursor.execute(
+                """
+                ALTER TABLE obligation_status
+                ADD COLUMN paid_date TEXT
+                """
+            )
+        except Exception:
+            pass
+
+        try:
+            cursor.execute(
+                """
+                ALTER TABLE income_status
+                ADD COLUMN paid_date TEXT
+                """
+            )
+        except Exception:
+            pass
+
         cursor.execute(
             """
             UPDATE vaults

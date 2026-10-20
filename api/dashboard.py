@@ -16,6 +16,7 @@ from api.schemas import (
     SafeToSpendBreakdownResponse,
     SetupStatusResponse,
     SettlementResponse,
+    SharedVaultBalanceCardResponse,
     VaultContext,
 )
 from db.dashboard import get_dashboard_page_data, get_onboarding_status
@@ -98,6 +99,8 @@ def adapt_recent_activity(rows):
 
 def build_safe_to_spend_breakdown(summary):
     settlement = summary["settlement_summary"]
+    payable = number(settlement.get("payable"))
+    receivable = number(settlement.get("receivable"))
     items = [
         SafeToSpendBreakdownItem(
             key="available_cash",
@@ -108,34 +111,48 @@ def build_safe_to_spend_breakdown(summary):
         SafeToSpendBreakdownItem(
             key="you_owe",
             label="You Owe",
-            amount=number(settlement["payable"]),
+            amount=payable,
             operation="subtract"
         ),
-        SafeToSpendBreakdownItem(
-            key="remaining_commitments",
-            label="Remaining Commitments",
-            amount=number(summary["remaining_commitments"]),
-            operation="subtract"
-        ),
-        SafeToSpendBreakdownItem(
-            key="credit_card_due",
-            label="Credit Card Due",
-            amount=number(summary["credit_card_due"]),
-            operation="subtract"
-        ),
-        SafeToSpendBreakdownItem(
-            key="savings_goal",
-            label="Savings Goal",
-            amount=number(summary["monthly_savings_goal"]),
-            operation="subtract"
-        )
     ]
-    raw_total = (
-        items[0].amount
-        - items[1].amount
-        - items[2].amount
-        - items[3].amount
-        - items[4].amount
+    if receivable > 0:
+        items.append(
+            SafeToSpendBreakdownItem(
+                key="you_are_owed",
+                label="You Are Owed",
+                amount=receivable,
+                operation="add"
+            )
+        )
+    savings_goal_amount = number(summary.get("savings_goal_remaining")) if summary.get("savings_goal_remaining") is not None else number(summary.get("monthly_savings_goal", 0))
+    if summary.get("monthly_savings_goal") is not None:
+        savings_goal_amount = min(savings_goal_amount, number(summary["monthly_savings_goal"]))
+
+    items.extend(
+        [
+            SafeToSpendBreakdownItem(
+                key="remaining_commitments",
+                label="Remaining Commitments",
+                amount=number(summary["remaining_commitments"]),
+                operation="subtract"
+            ),
+            SafeToSpendBreakdownItem(
+                key="credit_card_due",
+                label="Credit Card Due",
+                amount=number(summary["credit_card_due"]),
+                operation="subtract"
+            ),
+            SafeToSpendBreakdownItem(
+                key="savings_goal",
+                label="Remaining Savings Goal",
+                amount=savings_goal_amount,
+                operation="subtract"
+            )
+        ]
+    )
+    raw_total = sum(
+        item.amount if item.operation == "add" else -item.amount
+        for item in items
     )
     total = number(summary["safe_to_spend"])
 
@@ -199,6 +216,20 @@ def adapt_dashboard_response(vault: VaultContext, payload, cycle):
                 net=number(settlement["net"]),
                 items=to_json_safe(settlement.get("items", []))
             ),
+            showSharedBalancesOnDashboard=bool(summary.get("show_shared_balances_on_dashboard", True)),
+            sharedVaultBalances=[
+                SharedVaultBalanceCardResponse(
+                    id=int(card["id"]),
+                    name=str(card["name"]),
+                    amount=number(card["amount"]),
+                    direction=str(card["direction"]),
+                    label=str(card["label"]),
+                    payable=number(card["payable"]),
+                    receivable=number(card["receivable"]),
+                    showOnDashboard=bool(card.get("show_on_dashboard", True))
+                )
+                for card in summary.get("shared_vault_balances", [])
+            ],
             recentActivity=adapt_recent_activity(safe_payload.get("recent_activity", [])),
             spendingByCategory=[
                 CategorySpendItem(
@@ -221,6 +252,9 @@ def adapt_dashboard_response(vault: VaultContext, payload, cycle):
                 hasCommitments=bool(status_payload["has_commitments"]),
                 isComplete=bool(status_payload["is_complete"])
             ),
+            netSavingsThisCycle=number(summary.get("net_savings_this_cycle", summary.get("actual_savings", 0))),
+            actualSavings=number(summary.get("actual_savings", 0)),
+            savingsGoalRemaining=number(summary.get("savings_goal_remaining", 0)),
             summary=summary
         )
     )

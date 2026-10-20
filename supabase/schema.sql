@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS vaults (
     financial_cycle_start_day INTEGER NOT NULL DEFAULT 1,
     monthly_savings_goal DOUBLE PRECISION NOT NULL DEFAULT 0,
     vault_type TEXT NOT NULL DEFAULT 'Individual',
+    primary_shared_vault_id BIGINT REFERENCES vaults(id) ON DELETE SET NULL,
     is_admin INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -74,6 +75,7 @@ CREATE TABLE IF NOT EXISTS obligation_status (
     status TEXT DEFAULT 'PENDING',
     notes TEXT,
     transaction_id BIGINT,
+    paid_date TEXT,
     UNIQUE(commitment_id, month, year)
 );
 
@@ -86,6 +88,7 @@ CREATE TABLE IF NOT EXISTS income_status (
     status TEXT DEFAULT 'PENDING',
     notes TEXT,
     transaction_id BIGINT,
+    paid_date TEXT,
     UNIQUE(income_template_id, month, year)
 );
 
@@ -250,6 +253,9 @@ DROP TABLE IF EXISTS notifications;
 
 ALTER TABLE vaults
     ADD COLUMN IF NOT EXISTS monthly_savings_goal DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+ALTER TABLE vaults
+    ADD COLUMN IF NOT EXISTS primary_shared_vault_id BIGINT REFERENCES vaults(id) ON DELETE SET NULL;
 
 ALTER TABLE categories
     ALTER COLUMN vault_id DROP NOT NULL;

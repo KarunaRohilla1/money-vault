@@ -668,20 +668,37 @@ def get_shared_vault_summary(shared_vault_id, start_date, end_date):
 
 
 @cache_data(ttl=60)
-def get_personal_outstanding_settlements(vault_id, start_date, end_date):
+def get_personal_outstanding_settlements(vault_id, start_date, end_date, shared_vault_id=None):
     conn = get_connection()
     try:
-        shared_vaults = get_shared_vaults_for_personal_with_cursor(
-            conn,
-            vault_id
-        )
+        if shared_vault_id is not None:
+            row = conn.execute(
+                """
+                SELECT
+                    shared.id,
+                    shared.name
+                FROM vault_shares vs
+                JOIN vaults shared
+                    ON vs.vault_id = shared.id
+                WHERE vs.shared_vault_id = ?
+                AND vs.vault_id = ?
+                AND shared.vault_type = 'Shared'
+                """,
+                (vault_id, int(shared_vault_id))
+            ).fetchone()
+            shared_vaults = [row] if row else []
+        else:
+            shared_vaults = get_shared_vaults_for_personal_with_cursor(
+                conn,
+                vault_id
+            )
         outstanding = []
 
         for shared_vault in shared_vaults:
-            shared_vault_id = shared_vault[0]
+            s_vault_id = shared_vault[0]
             balances = get_shared_balances_with_cursor(
                 conn,
-                shared_vault_id,
+                s_vault_id,
                 start_date,
                 end_date
             )
@@ -692,7 +709,7 @@ def get_personal_outstanding_settlements(vault_id, start_date, end_date):
             for settlement in settlements:
                 if settlement["to_vault_id"] == vault_id:
                     outstanding.append({
-                        "shared_vault_id": shared_vault_id,
+                        "shared_vault_id": s_vault_id,
                         "shared_vault_name": shared_vault[1],
                         "direction": "receivable",
                         "label": "Owed to You:",
@@ -706,7 +723,7 @@ def get_personal_outstanding_settlements(vault_id, start_date, end_date):
                     })
                 elif settlement["from_vault_id"] == vault_id:
                     outstanding.append({
-                        "shared_vault_id": shared_vault_id,
+                        "shared_vault_id": s_vault_id,
                         "shared_vault_name": shared_vault[1],
                         "direction": "payable",
                         "label": "You Owe:",
@@ -725,11 +742,12 @@ def get_personal_outstanding_settlements(vault_id, start_date, end_date):
         conn.close()
 
 
-def get_settlement_summary(vault_id, start_date, end_date):
+def get_settlement_summary(vault_id, start_date, end_date, shared_vault_id=None):
     settlements = get_personal_outstanding_settlements(
         vault_id,
         start_date,
-        end_date
+        end_date,
+        shared_vault_id=shared_vault_id
     )
     receivable = as_money(
         sum(

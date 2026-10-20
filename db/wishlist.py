@@ -22,7 +22,10 @@ def ensure_wishlist_schema_with_cursor(cursor):
         "ALTER TABLE wishlist_items ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'MEDIUM'",
         "ALTER TABLE wishlist_items ADD COLUMN IF NOT EXISTS purchase_link TEXT",
         "ALTER TABLE wishlist_items ADD COLUMN IF NOT EXISTS image_source TEXT",
-        "ALTER TABLE wishlist_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"
+        "ALTER TABLE wishlist_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE wishlist_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ACTIVE'",
+        "ALTER TABLE wishlist_items ADD COLUMN IF NOT EXISTS purchased_amount DOUBLE PRECISION",
+        "ALTER TABLE wishlist_items ADD COLUMN IF NOT EXISTS purchased_date TEXT"
     ]
     for statement in statements:
         cursor.execute(statement, capture_lastrowid=False)
@@ -367,7 +370,7 @@ def add_wishlist_item(
 
 
 @cache_data(ttl=60)
-def get_wishlist_items(vault_id, search=None, account_id=None, date_filter="All Dates", category=None):
+def get_wishlist_items(vault_id, search=None, account_id=None, date_filter="All Dates", category=None, status=None):
     ensure_wishlist_schema()
     conn = get_connection()
     try:
@@ -387,13 +390,21 @@ def get_wishlist_items(vault_id, search=None, account_id=None, date_filter="All 
             w.purchase_link,
             w.image_source,
             w.created_at,
-            w.category_id
+            w.category_id,
+            COALESCE(w.status, 'ACTIVE'),
+            w.purchased_amount,
+            w.purchased_date
         FROM wishlist_items w
         LEFT JOIN accounts a ON w.account_id = a.id
         WHERE w.vault_id = ?
         AND w.is_active = 1
         """
         params = [vault_id]
+        if status:
+            query += """
+            AND UPPER(COALESCE(w.status, 'ACTIVE')) = ?
+            """
+            params.append(status.strip().upper())
         if search:
             query += """
             AND (
@@ -453,13 +464,89 @@ def get_wishlist_item(item_id):
                 purchase_link,
                 image_source,
                 created_at,
-                category_id
+                category_id,
+                COALESCE(status, 'ACTIVE'),
+                purchased_amount,
+                purchased_date
             FROM wishlist_items
             WHERE id = ?
             AND is_active = 1
             """,
             (item_id,)
         ).fetchone()
+    finally:
+        conn.close()
+
+
+def complete_wishlist_item(item_id, vault_id, purchased_amount=None, purchased_date=None):
+    conn = get_connection()
+    try:
+        ensure_wishlist_schema_with_cursor(conn.cursor())
+        row = conn.execute(
+            """
+            SELECT id, status, estimated_cost
+            FROM wishlist_items
+            WHERE id = ? AND vault_id = ? AND is_active = 1
+            """,
+            (item_id, vault_id)
+        ).fetchone()
+        if not row:
+            raise ValueError("Wishlist item not found.")
+        current_status = (row[1] or "ACTIVE").upper()
+        if current_status == "COMPLETED":
+            raise ValueError("Wishlist item is already completed.")
+
+        actual_cost = float(purchased_amount) if purchased_amount is not None else float(row[2] or 0)
+        conn.execute(
+            """
+            UPDATE wishlist_items
+            SET
+                status = 'COMPLETED',
+                purchased_amount = ?,
+                purchased_date = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND vault_id = ?
+            """,
+            (actual_cost, purchased_date, item_id, vault_id)
+        )
+        conn.commit()
+        clear_data_cache(("wishlist",))
+    finally:
+        conn.close()
+
+
+def reopen_wishlist_item(item_id, vault_id):
+    conn = get_connection()
+    try:
+        ensure_wishlist_schema_with_cursor(conn.cursor())
+        row = conn.execute(
+            """
+            SELECT id, status
+            FROM wishlist_items
+            WHERE id = ? AND vault_id = ? AND is_active = 1
+            """,
+            (item_id, vault_id)
+        ).fetchone()
+        if not row:
+            raise ValueError("Wishlist item not found.")
+        current_status = (row[1] or "ACTIVE").upper()
+        if current_status == "ACTIVE":
+            raise ValueError("Wishlist item is already active.")
+
+        conn.execute(
+            """
+            UPDATE wishlist_items
+            SET
+                status = 'ACTIVE',
+                purchased_amount = NULL,
+                purchased_date = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND vault_id = ?
+            """,
+            (item_id, vault_id)
+        )
+        conn.commit()
+        clear_data_cache(("wishlist",))
     finally:
         conn.close()
 
@@ -477,7 +564,10 @@ def update_wishlist_item(
     category_id=None,
     priority="MEDIUM",
     purchase_link="",
-    image_source=None
+    image_source=None,
+    status=None,
+    purchased_amount=None,
+    purchased_date=None
 ):
     conn = get_connection()
     try:
@@ -498,6 +588,9 @@ def update_wishlist_item(
                 image_url = ?,
                 image_source = ?,
                 notes = ?,
+                status = COALESCE(?, status),
+                purchased_amount = COALESCE(?, purchased_amount),
+                purchased_date = COALESCE(?, purchased_date),
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
@@ -514,6 +607,9 @@ def update_wishlist_item(
                 image_url,
                 normalize_image_source(image_source),
                 notes,
+                status,
+                purchased_amount,
+                purchased_date,
                 item_id
             )
         )
@@ -543,7 +639,9 @@ def get_wishlist_summary(vault_id):
             SELECT
                 COUNT(*),
                 COALESCE(SUM(estimated_cost), 0),
-                COALESCE(SUM(saved_amount), 0)
+                COALESCE(SUM(saved_amount), 0),
+                COALESCE(SUM(CASE WHEN UPPER(COALESCE(status, 'ACTIVE')) = 'COMPLETED' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN UPPER(COALESCE(status, 'ACTIVE')) = 'COMPLETED' THEN COALESCE(purchased_amount, estimated_cost) ELSE 0 END), 0)
             FROM wishlist_items
             WHERE vault_id = ?
             AND is_active = 1
@@ -553,11 +651,15 @@ def get_wishlist_summary(vault_id):
         total_items = row[0]
         total_cost = row[1]
         total_saved = row[2]
+        completed_items = row[3]
+        completed_spent = row[4]
         progress = round((total_saved / total_cost) * 100) if total_cost else 0
         return {
             "total_items": total_items,
             "total_cost": total_cost,
             "total_saved": total_saved,
+            "completed_items": completed_items,
+            "completed_spent": completed_spent,
             "progress": progress
         }
     finally:

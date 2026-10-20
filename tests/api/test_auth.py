@@ -237,7 +237,9 @@ def test_connected_shared_vault_listing_is_scoped_to_authenticated_personal_vaul
             "isAdmin": False,
             "vaultType": "Shared",
             "role": "member",
-            "memberCount": 0
+            "memberCount": 0,
+            "includeInSafeToSpend": True,
+            "showOnDashboard": True
         }
     ]
 
@@ -385,6 +387,44 @@ def user_vault_context():
     )
 
 
+def test_safe_to_spend_inclusion_retries_membership_deadlock(monkeypatch):
+    from db.identity import SharedVaultMembership
+    from db import postgres
+
+    pytest.importorskip("psycopg2")
+
+    client = build_client(monkeypatch)
+    install_vault_lookup(monkeypatch)
+    monkeypatch.setattr("api.dependencies.verify_access_token", lambda _token: user_vault_context())
+    monkeypatch.setattr(
+        "api.auth.set_shared_vault_included_in_safe_to_spend",
+        lambda *_args, **_kwargs: False
+    )
+    calls = {"list": 0}
+
+    def list_memberships(_user_id):
+        calls["list"] += 1
+        if calls["list"] == 1:
+            raise postgres.errors.DeadlockDetected("deadlock detected")
+        return [
+            SharedVaultMembership(id="8", name="Shared eight", role="member", member_count=2)
+        ]
+
+    monkeypatch.setattr("api.auth.list_shared_memberships_for_user", list_memberships)
+
+    response = client.put(
+        "/api/vaults/personal/shared-vaults/8/safe-to-spend",
+        headers={"Authorization": "Bearer jwt-token"},
+        json={"includeInSafeToSpend": False}
+    )
+
+    assert response.status_code == 200
+    assert calls["list"] == 2
+    assert response.json()["includeInSafeToSpend"] is False
+    assert response.json()["id"] == 8
+    assert response.json()["name"] == "Shared eight"
+
+
 def test_shared_vault_listing_uses_memberships_for_user_tokens(monkeypatch):
     from db.identity import SharedVaultMembership
 
@@ -409,6 +449,8 @@ def test_shared_vault_listing_uses_memberships_for_user_tokens(monkeypatch):
             "vaultType": "Shared",
             "role": "owner",
             "memberCount": 2,
+            "includeInSafeToSpend": True,
+            "showOnDashboard": True,
         },
         {
             "id": 40,
@@ -417,6 +459,8 @@ def test_shared_vault_listing_uses_memberships_for_user_tokens(monkeypatch):
             "vaultType": "Shared",
             "role": "member",
             "memberCount": 3,
+            "includeInSafeToSpend": True,
+            "showOnDashboard": True,
         },
     ]
 

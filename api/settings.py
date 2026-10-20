@@ -3,7 +3,13 @@ from fastapi import APIRouter, Depends
 from api.dependencies import get_authenticated_vault
 from api.resources import bad_request, int_vault_id
 from api.schemas import SettingsResponse, SettingsUpdateRequest, VaultContext, VaultSummaryResponse
-from db.identity import MEMBER_ROLE, OWNER_ROLE, get_membership
+from db.identity import (
+    MEMBER_ROLE,
+    OWNER_ROLE,
+    get_membership,
+    get_show_shared_balances_on_dashboard,
+    set_show_shared_balances_on_dashboard,
+)
 from db.vaults import (
     get_all_vaults,
     get_connected_shared_vaults,
@@ -12,6 +18,12 @@ from db.vaults import (
     get_vault_financial_settings,
     update_vault
 )
+
+
+def personal_vault_id_for(vault: VaultContext) -> int:
+    if vault.authenticated_vault_id:
+        return int(vault.authenticated_vault_id)
+    return int(vault.id)
 
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -82,7 +94,8 @@ def settings(vault: VaultContext = Depends(get_authenticated_vault)):
         currentVault=adapt_vault(current, user_id=vault.user_id),
         accessibleVaults=accessible_vaults_for(accessible_source),
         cycleStartDay=int(financial[0] or 1),
-        monthlySavingsGoal=float(financial[1] or 0)
+        monthlySavingsGoal=float(financial[1] or 0),
+        showSharedBalancesOnDashboard=get_show_shared_balances_on_dashboard(personal_vault_id_for(vault))
     )
 
 
@@ -104,6 +117,11 @@ def update_settings(request: SettingsUpdateRequest, vault: VaultContext = Depend
             month_start_day=request.cycle_start_day,
             monthly_savings_goal=request.monthly_savings_goal
         )
+        if request.show_shared_balances_on_dashboard is not None:
+            set_show_shared_balances_on_dashboard(
+                personal_vault_id_for(vault),
+                request.show_shared_balances_on_dashboard
+            )
     except ValueError as exc:
         raise bad_request(str(exc)) from exc
 

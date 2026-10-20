@@ -1,13 +1,185 @@
 from db.accounts import get_accounts
 from db.cache import cache_data
-from db.core import get_connection
+from db.core import (
+    EXPENSE,
+    INCOME,
+    TRANSFER_IN,
+    TRANSFER_OUT,
+    get_connection
+)
 from db.financial_cycles import get_current_cycle
 from db.planning import get_commitments, get_income_templates
+from db.identity import (
+    get_show_shared_balances_on_dashboard,
+    list_connected_shared_vault_preferences,
+)
 from db.shared_expenses import (
+    as_money,
     get_actual_category_spending,
     get_personal_spend_summary,
     get_settlement_summary,
 )
+
+
+def combine_included_settlements(summaries):
+    if not summaries:
+        return {
+            "label": "No shared vaults included in Safe to Spend",
+            "amount": 0,
+            "direction": "settled",
+            "receivable": 0,
+            "payable": 0,
+            "net": 0,
+            "items": []
+        }
+
+    receivable = as_money(sum(summary["receivable"] for summary in summaries))
+    payable = as_money(sum(summary["payable"] for summary in summaries))
+    items = []
+    for summary in summaries:
+        items.extend(summary.get("items") or [])
+    net = as_money(receivable - payable)
+
+    if net > 0:
+        label = "Owed to You:"
+        amount = net
+        direction = "receivable"
+    elif net < 0:
+        label = "You Owe:"
+        amount = abs(net)
+        direction = "payable"
+    else:
+        label = "All Settled"
+        amount = 0
+        direction = "settled"
+
+    return {
+        "label": label,
+        "amount": amount,
+        "direction": direction,
+        "receivable": receivable,
+        "payable": payable,
+        "net": net,
+        "items": items
+    }
+
+
+@cache_data(ttl=60)
+def get_cycle_savings_summary(vault_id, start_date, end_date):
+    """
+    Calculate Net Savings This Cycle as money put into savings (transfers in + direct income)
+    minus money taken out of savings (transfers out + direct expenses) during the cycle.
+    Transfers from a primary account (or non-savings account) to a savings account count as savings.
+    Transfers from a savings account back to primary (or non-savings account) count as withdrawals.
+    External income deposited directly into savings counts toward savings.
+    Expenses paid directly from savings reduce savings for the cycle.
+    Transfers between own accounts are not double-counted as income or expenses.
+    """
+    start_iso = start_date.isoformat() if hasattr(start_date, "isoformat") else str(start_date)
+    end_iso = end_date.isoformat() if hasattr(end_date, "isoformat") else str(end_date)
+    conn = get_connection()
+    try:
+        transfer_row = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(
+                    CASE
+                        WHEN LOWER(a_to.type) = 'savings account'
+                             AND (a_from.is_primary = 1 OR LOWER(a_from.type) != 'savings account')
+                             AND a_from.id != a_to.id
+                        THEN t_out.amount
+                        ELSE 0
+                    END
+                ), 0) AS savings_transfers_in,
+                COALESCE(SUM(
+                    CASE
+                        WHEN LOWER(a_from.type) = 'savings account'
+                             AND (a_to.is_primary = 1 OR LOWER(a_to.type) != 'savings account')
+                             AND a_from.id != a_to.id
+                        THEN t_out.amount
+                        ELSE 0
+                    END
+                ), 0) AS savings_transfers_out
+            FROM transactions t_out
+            JOIN transactions t_in
+                ON t_out.transfer_group_id = t_in.transfer_group_id
+                AND t_in.transaction_type = ?
+                AND t_in.is_deleted = 0
+            JOIN accounts a_from
+                ON t_out.account_id = a_from.id
+            JOIN accounts a_to
+                ON t_in.account_id = a_to.id
+            WHERE t_out.vault_id = ?
+            AND t_out.transaction_type = ?
+            AND t_out.transfer_group_id IS NOT NULL
+            AND t_out.is_deleted = 0
+            AND t_out.date BETWEEN ? AND ?
+            """,
+            (
+                TRANSFER_IN,
+                vault_id,
+                TRANSFER_OUT,
+                start_iso,
+                end_iso
+            )
+        ).fetchone()
+
+        savings_transfers_in = as_money(transfer_row[0]) if transfer_row else 0.0
+        savings_transfers_out = as_money(transfer_row[1]) if transfer_row else 0.0
+
+        direct_row = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(
+                    CASE
+                        WHEN t.transaction_type = ? THEN t.amount
+                        ELSE 0
+                    END
+                ), 0) AS savings_income,
+                COALESCE(SUM(
+                    CASE
+                        WHEN t.transaction_type = ? THEN t.amount
+                        ELSE 0
+                    END
+                ), 0) AS savings_expenses
+            FROM transactions t
+            JOIN accounts a
+                ON t.account_id = a.id
+            WHERE t.vault_id = ?
+            AND t.is_deleted = 0
+            AND LOWER(a.type) = 'savings account'
+            AND t.transaction_type IN (?, ?)
+            AND t.date BETWEEN ? AND ?
+            """,
+            (
+                INCOME,
+                EXPENSE,
+                vault_id,
+                INCOME,
+                EXPENSE,
+                start_iso,
+                end_iso
+            )
+        ).fetchone()
+
+        savings_income = as_money(direct_row[0]) if direct_row else 0.0
+        savings_expenses = as_money(direct_row[1]) if direct_row else 0.0
+
+        savings_in = as_money(savings_transfers_in + savings_income)
+        savings_out = as_money(savings_transfers_out + savings_expenses)
+        net_savings = as_money(savings_in - savings_out)
+
+        return {
+            "savings_in": savings_in,
+            "savings_out": savings_out,
+            "net_savings": net_savings,
+            "savings_transfers_in": savings_transfers_in,
+            "savings_transfers_out": savings_transfers_out,
+            "savings_income": savings_income,
+            "savings_expenses": savings_expenses
+        }
+    finally:
+        conn.close()
 
 
 @cache_data(ttl=60)
@@ -271,25 +443,53 @@ def get_dashboard_page_data(vault_id):
         start_date,
         end_date
     )
-    settlement_balance = spend_summary[
-        "settlement_balance"
-    ]
-    settlement_summary = get_settlement_summary(
+    shared_vault_prefs = list_connected_shared_vault_preferences(vault_id)
+    shared_vault_balances = []
+    included_summaries = []
+    for shared_vault in shared_vault_prefs:
+        settlement_cycle = get_current_cycle(shared_vault["id"])
+        vault_summary = get_settlement_summary(
+            vault_id,
+            settlement_cycle.start_iso,
+            settlement_cycle.end_iso,
+            shared_vault_id=shared_vault["id"]
+        )
+        shared_vault_balances.append(
+            {
+                "id": shared_vault["id"],
+                "name": shared_vault["name"],
+                "amount": vault_summary["amount"],
+                "direction": vault_summary["direction"],
+                "label": vault_summary["label"],
+                "payable": vault_summary["payable"],
+                "receivable": vault_summary["receivable"],
+                "show_on_dashboard": bool(shared_vault.get("show_on_dashboard", True))
+            }
+        )
+        if shared_vault["include_in_safe_to_spend"]:
+            included_summaries.append(vault_summary)
+
+    settlement_summary = combine_included_settlements(included_summaries)
+    settlement_balance = settlement_summary["net"]
+    show_shared_balances_on_dashboard = get_show_shared_balances_on_dashboard(vault_id)
+    actual_income = row[10]
+    savings_summary = get_cycle_savings_summary(
         vault_id,
         start_date,
         end_date
     )
-    actual_income = row[10]
+    net_savings_this_cycle = savings_summary["net_savings"]
+    actual_savings = net_savings_this_cycle
+    savings_goal_remaining = as_money(
+        max(monthly_savings_goal - max(net_savings_this_cycle, 0), 0)
+    )
     safe_to_spend = max(
         available_cash
         - settlement_summary["payable"]
+        + settlement_summary["receivable"]
         - remaining_commitments
         - credit_card_due
-        - monthly_savings_goal,
-        0
-    )
-    actual_savings = max(
-        actual_income - spend_summary["actual_spending"],
+        - savings_goal_remaining,
         0
     )
     category_spending = [
@@ -332,7 +532,15 @@ def get_dashboard_page_data(vault_id):
             "total_liabilities": total_liabilities,
             "net_worth": total_assets - total_liabilities,
             "monthly_savings_goal": monthly_savings_goal,
+            "savings_goal_remaining": savings_goal_remaining,
             "actual_savings": actual_savings,
+            "net_savings_this_cycle": net_savings_this_cycle,
+            "savings_transfers_in": savings_summary["savings_transfers_in"],
+            "savings_transfers_out": savings_summary["savings_transfers_out"],
+            "savings_income": savings_summary["savings_income"],
+            "savings_expenses": savings_summary["savings_expenses"],
+            "savings_in": savings_summary["savings_in"],
+            "savings_out": savings_summary["savings_out"],
             "remaining_commitments": remaining_commitments,
             "expenses": spend_summary["actual_spending"],
             "personal_expenses": spend_summary["personal_spending"],
@@ -340,6 +548,8 @@ def get_dashboard_page_data(vault_id):
             "shared_share": spend_summary["own_shared_share"],
             "settlement_balance": settlement_balance,
             "settlement_summary": settlement_summary,
+            "show_shared_balances_on_dashboard": show_shared_balances_on_dashboard,
+            "shared_vault_balances": shared_vault_balances,
             "credit_card_due": credit_card_due,
             "safe_to_spend": safe_to_spend
         },

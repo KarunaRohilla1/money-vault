@@ -17,11 +17,12 @@ if str(ROOT) not in sys.path:
 import uvicorn
 
 from api.config import get_config
-from api.env import load_local_env
+from api.env import get_database_target_info, load_local_env
 
 
 def main() -> None:
-    load_local_env()
+    # Force loading .env.development for local/dev API runs
+    load_local_env(override=True)
     os.environ.setdefault("APP_ENV", "development")
     get_config.cache_clear()
     config = get_config()
@@ -29,9 +30,19 @@ def main() -> None:
     host = os.environ.get("API_HOST", config.api_host)
     port = int(os.environ.get("API_PORT", str(config.api_port)))
 
-    print(f"Starting Money Vault API ({config.app_env}) on http://{host}:{port}")
-    print("Health: http://127.0.0.1:{0}/health".format(port))
-    print("Docs:   http://127.0.0.1:{0}/docs".format(port))
+    db_info = get_database_target_info()
+    project_ref = db_info.get("project_ref") or "unknown"
+    db_host = db_info.get("host") or "unknown"
+
+    print("=" * 60)
+    print("Starting Money Vault Local Development API")
+    print(f"Environment:       {config.app_env}")
+    print(f"Supabase Project:  {project_ref}")
+    print(f"Database Host:     {db_host}")
+    print(f"Server Address:    http://{host}:{port}")
+    print(f"Health Check:      http://127.0.0.1:{port}/health")
+    print(f"API Docs:          http://127.0.0.1:{port}/docs")
+    print("=" * 60)
     print("Phone/emulator clients must use your LAN IP or 10.0.2.2, not 127.0.0.1.")
 
     uvicorn.run(
